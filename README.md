@@ -13,19 +13,37 @@ This directory contains a C++ port of the legacy `miniSMC` solver that now uses 
 
 ## Building
 
-1. Install AMReX with the desired backend (set `AMReX_GPU_BACKEND=NONE`, `CUDA`, `HIP`, or `SYCL`). Make sure `AMReX_DIR` points to the install location containing the generated `AMReXConfig.cmake`.
-2. Configure and build:
-   ```bash
-   cd amrex-miniSMC
-   cmake -S . -B build -DAMReX_GPU_BACKEND=CUDA   # choose backend
-   cmake --build build -j
-   ```
-3. Run with MPI (example uses 4 ranks):
-   ```bash
-   mpirun -n 4 build/miniSMC inputs/inputs_smc
-   ```
+Two workflows are supported: using an existing AMReX installation or running a super-build that compiles AMReX from the checked-out sources that now live alongside this directory.
 
-AMReX handles OpenMP threading automatically when configured with `-DAMReX_OMP=ON`. GPU backends are enabled via `AMReX_GPU_BACKEND` during configure time; no code changes are required.
+### Super-build (local AMReX checkout)
+
+```bash
+cd amrex-miniSMC
+cmake -S . -B build \
+      -DMINISMC_USE_SUPERBUILD=ON \
+      -DAMREX_SOURCE_DIR=../amrex \
+      -DAMReX_GPU_BACKEND=CUDA -DAMReX_MPI=ON   # pick backend/options
+cmake --build build -j
+```
+
+You can pass any regular `AMReX_*` cache variable at configure time (e.g., `-DAMReX_OMP=ON`, `-DAMReX_AMRDATA=OFF`, …); they will be forwarded to the internal AMReX configure step.
+
+### Using an existing AMReX installation
+
+```bash
+cd amrex-miniSMC
+cmake -S . -B build -DAMReX_DIR=/path/to/amrex/install \
+      -DAMReX_GPU_BACKEND=CUDA
+cmake --build build -j
+```
+
+### Running
+
+```bash
+mpirun -n 4 build/miniSMC inputs/inputs_smc
+```
+
+AMReX handles OpenMP threading automatically when configured with `-DAMReX_OMP=ON`. GPU backends are enabled through `AMReX_GPU_BACKEND` (values: `NONE`, `CUDA`, `HIP`, `SYCL`).
 
 ## Runtime Parameters
 
@@ -43,4 +61,3 @@ All parameters from the original `inputs_SMC` namelist are supported via plain A
 - Validate the new solver against the legacy miniSMC benchmarks and tune the `inputs` deck accordingly.
 - Reintroduce the 8th-order derivative stencils if that accuracy level is required.
 - Hook up plotfile/density diagnostics or checkpoints as needed.
-
