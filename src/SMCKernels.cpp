@@ -32,6 +32,10 @@ void add_diffusive_part2(const Geometry& geom,
                          MultiFab& rhs);
 
 constexpr Real kRu = 8.31446261815324e+07_rt;
+constexpr Real kPrandtl = 0.72_rt;
+constexpr Real kSchmidt = 0.72_rt;
+constexpr Real kInvPrandtl = 1.0_rt / kPrandtl;
+constexpr Real kInvSchmidt = 1.0_rt / kSchmidt;
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 Real d8_coeff(int idx) noexcept
@@ -724,6 +728,15 @@ void add_diffusive_part2(const Geometry& geom,
                 rp(i, j, k, URY1 + kInertSpecies) -= sumdry_val;
             });
         }
+
+        ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+            Real corr = rp(i, j, k, UMX) * qp(i, j, k, QU)
+                      + rp(i, j, k, UMY) * qp(i, j, k, QV);
+#if (AMREX_SPACEDIM == 3)
+            corr += rp(i, j, k, UMZ) * qp(i, j, k, QW);
+#endif
+            rp(i, j, k, UEDEN) += corr;
+        });
     }
 }
 
@@ -982,10 +995,11 @@ void ComputeTransport(const MultiFab& prim,
             CKMMWY(Y.data(), Wbar);
             Real cp;
             CKCPBS(T, Y.data(), cp);
-            lamp(i, j, k) = mu_val * cp / 0.72_rt;
+            lamp(i, j, k) = mu_val * cp * kInvPrandtl;
             Real invW = 1.0_rt / Wbar;
             for (int n = 0; n < NSpecies; ++n) {
-                dp(i, j, k, n) = mu_val * invW / 0.72_rt;
+                Real mw_n = mw(n);
+                dp(i, j, k, n) = mu_val * mw_n * invW * kInvSchmidt;
             }
         });
     }
