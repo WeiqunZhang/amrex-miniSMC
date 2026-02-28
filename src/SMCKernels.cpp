@@ -701,7 +701,9 @@ void ComputeCourant(const Geometry& geom,
 {
     const auto dxinv = geom.InvCellSizeArray();
 
-    Real local_max = -1.0e50_rt;
+    ReduceOps<ReduceOpMax> reduce_op;
+    ReduceData<Real> reduce_data(reduce_op);
+    using ReduceTuple = typename decltype(reduce_data)::Type;
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
@@ -710,9 +712,6 @@ void ComputeCourant(const Geometry& geom,
         const Box& bx = mfi.tilebox();
         auto qp = prim.const_array(mfi);
 
-        ReduceOps<ReduceOpMax> reduce_op;
-        ReduceData<Real> reduce_data(reduce_op);
-        using ReduceTuple = typename decltype(reduce_data)::Type;
         reduce_op.eval(bx, reduce_data,
             [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept -> ReduceTuple {
                 GpuArray<Real, NSpecies> X;
@@ -731,11 +730,10 @@ void ComputeCourant(const Geometry& geom,
 #endif
                 return {cour};
             });
-        ReduceTuple tile_tuple = reduce_data.value(reduce_op);
-        Real tile_max = amrex::get<0>(tile_tuple);
-        local_max = amrex::max(local_max, tile_max);
     }
 
+    ReduceTuple result = reduce_data.value(reduce_op);
+    Real local_max = amrex::get<0>(result);
     ParallelDescriptor::ReduceRealMax(local_max);
     courno = local_max;
 }
