@@ -102,43 +102,6 @@ void apply_offset(int dir, int offset, int& i, int& j, int& k) noexcept
     }
 }
 
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
-Real face_interp(const Array4<const Real>& arr,
-                 int comp,
-                 int dir,
-                 int i, int j, int k) noexcept
-{
-    Real sum = 0.0_rt;
-    for (int m = 0; m < 8; ++m) {
-        int offset = m - 3;
-        int ii = i;
-        int jj = j;
-        int kk = k;
-        apply_offset(dir, offset, ii, jj, kk);
-        sum += face_interp_coeff(m) * arr(ii, jj, kk, comp);
-    }
-    return sum;
-}
-
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
-Real face_deriv(const Array4<const Real>& arr,
-                int comp,
-                int dir,
-                int i, int j, int k,
-                Real dxinv) noexcept
-{
-    Real sum = 0.0_rt;
-    for (int m = 0; m < 8; ++m) {
-        int offset = m - 3;
-        int ii = i;
-        int jj = j;
-        int kk = k;
-        apply_offset(dir, offset, ii, jj, kk);
-        sum += face_deriv_coeff(m) * arr(ii, jj, kk, comp);
-    }
-    return sum * dxinv;
-}
-
 AMREX_GPU_MANAGED Real kM8[8][8] = {
     {-0.0028316326530612246_rt, 0.010408163265306122_rt, -0.0078571428571428577_rt, -0.00061224489795918364_rt, 0.00089285714285714283_rt, 0.0_rt, 0.0_rt, 0.0_rt},
     {0.015782312925170069_rt, -0.05859126984126984_rt, 0.045646258503401357_rt, -0.02119047619047619_rt, 0.026371882086167801_rt, -0.0080187074829931974_rt, 0.0_rt, 0.0_rt},
@@ -158,32 +121,6 @@ AMREX_GPU_MANAGED Real kM8T[8][8] = {
     {0.0_rt, -0.0080187074829931974_rt, -0.093628117913832201_rt, -0.16619047619047619_rt, 0.44993197278911562_rt, -0.32069444444444445_rt, -0.045646258503401357_rt, 0.0078571428571428577_rt},
     {0.0_rt, 0.0_rt, 0.021267006802721089_rt, 0.080657596371882093_rt, -0.17642857142857143_rt, 0.049931972789115646_rt, 0.05859126984126984_rt, -0.010408163265306122_rt},
     {0.0_rt, 0.0_rt, 0.0_rt, -0.017712585034013604_rt, 0.025306122448979593_rt, 0.0035714285714285713_rt, -0.015782312925170069_rt, 0.0028316326530612246_rt}};
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
-Real face_tangential_deriv(const Array4<const Real>& arr,
-                           int comp,
-                           int face_dir,
-                           int deriv_dir,
-                           int i, int j, int k,
-                           const GpuArray<Real, AMREX_SPACEDIM>& dxinv) noexcept
-{
-    Real sum = 0.0_rt;
-    for (int m = 0; m < 4; ++m) {
-        int offset = m + 1;
-        int ii_hi = i;
-        int jj_hi = j;
-        int kk_hi = k;
-        int ii_lo = i;
-        int jj_lo = j;
-        int kk_lo = k;
-        apply_offset(deriv_dir, offset, ii_hi, jj_hi, kk_hi);
-        apply_offset(deriv_dir, -offset, ii_lo, jj_lo, kk_lo);
-        Real hi = face_interp(arr, comp, face_dir, ii_hi, jj_hi, kk_hi);
-        Real lo = face_interp(arr, comp, face_dir, ii_lo, jj_lo, kk_lo);
-        sum += d8_coeff(m) * (hi - lo);
-    }
-    return sum * dxinv[deriv_dir];
-}
-
 enum ConsComp { URHO = 0, UMX, UMY, UMZ, UEDEN, URY1 };
 enum PrimComp { QRHO = 0, QU, QV, QW, QPRES, QTEMP, QEINT, QY = 7 };
 constexpr int QX = QY + NSpecies;
@@ -396,128 +333,6 @@ Real div_velocity(const Array4<const Real>& prim,
     divu += central_diff(prim, QW, i, j, k, 2, dxinv);
 #endif
     return divu;
-}
-
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
-void compute_tau_face_x(int i, int j, int k,
-                        const Array4<const Real>& qp,
-                        const Array4<const Real>& mu,
-                        const Array4<const Real>& xi,
-                        const GpuArray<Real, AMREX_SPACEDIM>& dxinv,
-                        Real& tau_xx, Real& tau_xy, Real& tau_xz) noexcept
-{
-    Real mu_face = face_interp(mu, 0, 0, i, j, k);
-    Real xi_face = face_interp(xi, 0, 0, i, j, k);
-    Real dudx = face_deriv(qp, QU, 0, i, j, k, dxinv[0]);
-    Real dvdy = face_tangential_deriv(qp, QV, 0, 1, i, j, k, dxinv);
-#if (AMREX_SPACEDIM == 3)
-    Real dwdz = face_tangential_deriv(qp, QW, 0, 2, i, j, k, dxinv);
-#else
-    Real dwdz = 0.0_rt;
-#endif
-    Real divu = dudx + dvdy + dwdz;
-    Real bulk = xi_face - (2.0_rt / 3.0_rt) * mu_face;
-    tau_xx = 2.0_rt * mu_face * dudx + bulk * divu;
-
-    Real dvdx = face_deriv(qp, QV, 0, i, j, k, dxinv[0]);
-    Real dudy = face_tangential_deriv(qp, QU, 0, 1, i, j, k, dxinv);
-    tau_xy = mu_face * (dudy + dvdx);
-
-#if (AMREX_SPACEDIM == 3)
-    Real dwdx = face_deriv(qp, QW, 0, i, j, k, dxinv[0]);
-    Real dudz = face_tangential_deriv(qp, QU, 0, 2, i, j, k, dxinv);
-    tau_xz = mu_face * (dudz + dwdx);
-#else
-    tau_xz = 0.0_rt;
-#endif
-}
-
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
-void compute_tau_face_y(int i, int j, int k,
-                        const Array4<const Real>& qp,
-                        const Array4<const Real>& mu,
-                        const Array4<const Real>& xi,
-                        const GpuArray<Real, AMREX_SPACEDIM>& dxinv,
-                        Real& tau_yx, Real& tau_yy, Real& tau_yz) noexcept
-{
-    Real mu_face = face_interp(mu, 0, 1, i, j, k);
-    Real xi_face = face_interp(xi, 0, 1, i, j, k);
-    Real dvdy = face_deriv(qp, QV, 1, i, j, k, dxinv[1]);
-    Real dudx = face_tangential_deriv(qp, QU, 1, 0, i, j, k, dxinv);
-#if (AMREX_SPACEDIM == 3)
-    Real dwdz = face_tangential_deriv(qp, QW, 1, 2, i, j, k, dxinv);
-#else
-    Real dwdz = 0.0_rt;
-#endif
-    Real divu = dudx + dvdy + dwdz;
-    Real bulk = xi_face - (2.0_rt / 3.0_rt) * mu_face;
-    tau_yy = 2.0_rt * mu_face * dvdy + bulk * divu;
-
-    Real dvdx = face_tangential_deriv(qp, QV, 1, 0, i, j, k, dxinv);
-    Real dudy = face_deriv(qp, QU, 1, i, j, k, dxinv[1]);
-    tau_yx = mu_face * (dvdx + dudy);
-
-#if (AMREX_SPACEDIM == 3)
-    Real dvdz = face_tangential_deriv(qp, QV, 1, 2, i, j, k, dxinv);
-    Real dwdy = face_deriv(qp, QW, 1, i, j, k, dxinv[1]);
-    tau_yz = mu_face * (dvdz + dwdy);
-#else
-    tau_yz = 0.0_rt;
-#endif
-}
-
-#if (AMREX_SPACEDIM == 3)
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
-void compute_tau_face_z(int i, int j, int k,
-                        const Array4<const Real>& qp,
-                        const Array4<const Real>& mu,
-                        const Array4<const Real>& xi,
-                        const GpuArray<Real, AMREX_SPACEDIM>& dxinv,
-                        Real& tau_zx, Real& tau_zy, Real& tau_zz) noexcept
-{
-    Real mu_face = face_interp(mu, 0, 2, i, j, k);
-    Real xi_face = face_interp(xi, 0, 2, i, j, k);
-    Real dwdz = face_deriv(qp, QW, 2, i, j, k, dxinv[2]);
-    Real dudx = face_tangential_deriv(qp, QU, 2, 0, i, j, k, dxinv);
-    Real dvdy = face_tangential_deriv(qp, QV, 2, 1, i, j, k, dxinv);
-    Real divu = dudx + dvdy + dwdz;
-    Real bulk = xi_face - (2.0_rt / 3.0_rt) * mu_face;
-    tau_zz = 2.0_rt * mu_face * dwdz + bulk * divu;
-
-    Real dwdx = face_tangential_deriv(qp, QW, 2, 0, i, j, k, dxinv);
-    Real dudz = face_deriv(qp, QU, 2, i, j, k, dxinv[2]);
-    tau_zx = mu_face * (dwdx + dudz);
-
-    Real dwdy = face_tangential_deriv(qp, QW, 2, 1, i, j, k, dxinv);
-    Real dvdz = face_deriv(qp, QV, 2, i, j, k, dxinv[2]);
-    tau_zy = mu_face * (dwdy + dvdz);
-}
-#endif
-
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
-Real compute_heat_flux_face(int dir,
-                            int i, int j, int k,
-                            const Array4<const Real>& qp,
-                            const Array4<const Real>& lam,
-                            const GpuArray<Real, AMREX_SPACEDIM>& dxinv) noexcept
-{
-    Real lam_face = face_interp(lam, 0, dir, i, j, k);
-    Real gradT = face_deriv(qp, QTEMP, dir, i, j, k, dxinv[dir]);
-    return -lam_face * gradT;
-}
-
-AMREX_GPU_DEVICE AMREX_FORCE_INLINE
-Real compute_species_flux_face(int dir,
-                               int i, int j, int k,
-                               int n,
-                               const Array4<const Real>& qp,
-                               const Array4<const Real>& dp,
-                               const GpuArray<Real, AMREX_SPACEDIM>& dxinv) noexcept
-{
-    Real rho_face = face_interp(qp, QRHO, dir, i, j, k);
-    Real diff_face = face_interp(dp, n, dir, i, j, k);
-    Real gradY = face_deriv(qp, QY + n, dir, i, j, k, dxinv[dir]);
-    return -rho_face * diff_face * gradY;
 }
 
 } // namespace
