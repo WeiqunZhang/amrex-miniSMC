@@ -13,6 +13,23 @@ namespace minismc::kernels {
 using namespace amrex;
 
 namespace {
+
+void add_diffusive_part1(const Geometry& geom,
+                         const MultiFab& prim,
+                         const MultiFab& mu,
+                         const MultiFab& xi,
+                         const MultiFab& lam,
+                         const MultiFab& Ddiag,
+                         MultiFab& rhs);
+
+void add_diffusive_part2(const Geometry& geom,
+                         const MultiFab& prim,
+                         const MultiFab& mu,
+                         const MultiFab& xi,
+                         const MultiFab& lam,
+                         const MultiFab& Ddiag,
+                         MultiFab& rhs);
+
 constexpr Real kRu = 8.31446261815324e+07_rt;
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
@@ -116,6 +133,25 @@ Real face_deriv(const Array4<const Real>& arr,
     return sum * dxinv;
 }
 
+constexpr Real kM8[8][8] = {
+    {-0.0028316326530612246_rt, 0.010408163265306122_rt, -0.0078571428571428577_rt, -0.00061224489795918364_rt, 0.00089285714285714283_rt, 0.0_rt, 0.0_rt, 0.0_rt},
+    {0.015782312925170069_rt, -0.05859126984126984_rt, 0.045646258503401357_rt, -0.02119047619047619_rt, 0.026371882086167801_rt, -0.0080187074829931974_rt, 0.0_rt, 0.0_rt},
+    {-0.0035714285714285713_rt, -0.049931972789115646_rt, 0.32069444444444445_rt, -0.36292517006802721_rt, 0.1680952380952381_rt, -0.093628117913832201_rt, 0.021267006802721089_rt, 0.0_rt},
+    {-0.025306122448979593_rt, 0.17642857142857143_rt, -0.44993197278911562_rt, -0.22073412698412698_rt, 0.6227891156462585_rt, -0.16619047619047619_rt, 0.080657596371882093_rt, -0.017712585034013604_rt},
+    {0.017712585034013604_rt, -0.080657596371882093_rt, 0.16619047619047619_rt, -0.6227891156462585_rt, 0.22073412698412698_rt, 0.44993197278911562_rt, -0.17642857142857143_rt, 0.025306122448979593_rt},
+    {0.0_rt, -0.021267006802721089_rt, 0.093628117913832201_rt, -0.1680952380952381_rt, 0.36292517006802721_rt, -0.32069444444444445_rt, 0.049931972789115646_rt, 0.0035714285714285713_rt},
+    {0.0_rt, 0.0_rt, 0.0080187074829931974_rt, -0.026371882086167801_rt, 0.02119047619047619_rt, -0.045646258503401357_rt, 0.05859126984126984_rt, -0.015782312925170069_rt},
+    {0.0_rt, 0.0_rt, 0.0_rt, -0.00089285714285714283_rt, 0.00061224489795918364_rt, 0.0078571428571428577_rt, -0.010408163265306122_rt, 0.0028316326530612246_rt}};
+
+constexpr Real kM8T[8][8] = {
+    {-0.0028316326530612246_rt, 0.015782312925170069_rt, -0.0035714285714285713_rt, -0.025306122448979593_rt, 0.017712585034013604_rt, 0.0_rt, 0.0_rt, 0.0_rt},
+    {0.010408163265306122_rt, -0.05859126984126984_rt, -0.049931972789115646_rt, 0.17642857142857143_rt, -0.080657596371882093_rt, -0.021267006802721089_rt, 0.0_rt, 0.0_rt},
+    {-0.0078571428571428577_rt, 0.045646258503401357_rt, 0.32069444444444445_rt, -0.44993197278911562_rt, 0.16619047619047619_rt, 0.093628117913832201_rt, 0.0080187074829931974_rt, 0.0_rt},
+    {-0.00061224489795918364_rt, -0.02119047619047619_rt, -0.36292517006802721_rt, -0.22073412698412698_rt, -0.6227891156462585_rt, -0.1680952380952381_rt, -0.026371882086167801_rt, -0.00089285714285714283_rt},
+    {0.00089285714285714283_rt, 0.026371882086167801_rt, 0.1680952380952381_rt, 0.6227891156462585_rt, 0.22073412698412698_rt, 0.36292517006802721_rt, 0.02119047619047619_rt, 0.00061224489795918364_rt},
+    {0.0_rt, -0.0080187074829931974_rt, -0.093628117913832201_rt, -0.16619047619047619_rt, 0.44993197278911562_rt, -0.32069444444444445_rt, -0.045646258503401357_rt, 0.0078571428571428577_rt},
+    {0.0_rt, 0.0_rt, 0.021267006802721089_rt, 0.080657596371882093_rt, -0.17642857142857143_rt, 0.049931972789115646_rt, 0.05859126984126984_rt, -0.010408163265306122_rt},
+    {0.0_rt, 0.0_rt, 0.0_rt, -0.017712585034013604_rt, 0.025306122448979593_rt, 0.0035714285714285713_rt, -0.015782312925170069_rt, 0.0028316326530612246_rt}};
 AMREX_GPU_DEVICE AMREX_FORCE_INLINE
 Real face_tangential_deriv(const Array4<const Real>& arr,
                            int comp,
@@ -146,6 +182,131 @@ enum ConsComp { URHO = 0, UMX, UMY, UMZ, UEDEN, URY1 };
 enum PrimComp { QRHO = 0, QU, QV, QW, QPRES, QTEMP, QEINT, QY = 7 };
 constexpr int QX = QY + NSpecies;
 constexpr int QH = QX + NSpecies;
+constexpr GpuArray<int, AMREX_SPACEDIM> kMomentumIndex{AMREX_D_DECL(UMX, UMY, UMZ)};
+constexpr GpuArray<int, AMREX_SPACEDIM> kVelocityIndex{AMREX_D_DECL(QU, QV, QW)};
+constexpr int kInertSpecies = N2_ID;
+constexpr Real FourThirds = 4.0_rt / 3.0_rt;
+
+template <typename F>
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+void gather_line(int dir,
+                 int i, int j, int k,
+                 const F& func,
+                 GpuArray<Real, 8>& data) noexcept
+{
+    for (int idx = 0; idx < 8; ++idx) {
+        int ii = i;
+        int jj = j;
+        int kk = k;
+        apply_offset(dir, idx - 4, ii, jj, kk);
+        data[idx] = func(ii, jj, kk);
+    }
+}
+
+template <typename F>
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+GpuArray<Real, 8>
+matmul_M8_line(int dir, int i, int j, int k, const F& func) noexcept
+{
+    GpuArray<Real, 8> result;
+    for (int col = 0; col < 8; ++col) {
+        Real sum = 0.0_rt;
+        for (int row = 0; row < 8; ++row) {
+            int ii = i;
+            int jj = j;
+            int kk = k;
+            apply_offset(dir, row - 4, ii, jj, kk);
+            sum += kM8[row][col] * func(ii, jj, kk);
+        }
+        result[col] = sum;
+    }
+    return result;
+}
+
+template <typename F>
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+GpuArray<Real, 8>
+matmul_M8T_line(int dir, int i, int j, int k, const F& func) noexcept
+{
+    GpuArray<Real, 8> result;
+    for (int col = 0; col < 8; ++col) {
+        Real sum = 0.0_rt;
+        for (int row = 0; row < 8; ++row) {
+            int ii = i;
+            int jj = j;
+            int kk = k;
+            apply_offset(dir, row - 4, ii, jj, kk);
+            sum += kM8T[row][col] * func(ii, jj, kk);
+        }
+        result[col] = sum;
+    }
+    return result;
+}
+
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+Real get_face_flux(const Array4<const Real>& flux,
+                   int dir,
+                   int i, int j, int k,
+                   int comp,
+                   int shift) noexcept
+{
+    if (dir == 0) {
+        return flux(i + shift, j, k, comp);
+    } else if (dir == 1) {
+        return flux(i, j + shift, k, comp);
+#if (AMREX_SPACEDIM == 3)
+    } else {
+        return flux(i, j, k + shift, comp);
+#else
+    } else {
+        return 0.0_rt;
+#endif
+    }
+}
+
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+Real compute_vsp(const Array4<const Real>& mu,
+                 const Array4<const Real>& xi,
+                 int i, int j, int k) noexcept
+{
+    return xi(i, j, k, 0) + FourThirds * mu(i, j, k, 0);
+}
+
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+Real compute_dpy(const Array4<const Real>& qp,
+                 const Array4<const Real>& dp,
+                 int i, int j, int k,
+                 int n) noexcept
+{
+    Real diff = dp(i, j, k, n);
+    Real pres = qp(i, j, k, QPRES);
+    Real xmf = qp(i, j, k, QX + n);
+    Real ymf = qp(i, j, k, QY + n);
+    return diff / pres * (xmf - ymf);
+}
+
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+Real compute_dxe(const Array4<const Real>& qp,
+                 const Array4<const Real>& dp,
+                 int i, int j, int k,
+                 int n) noexcept
+{
+    return dp(i, j, k, n) * qp(i, j, k, QH + n);
+}
+
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+Real compute_dpe(const Array4<const Real>& qp,
+                 const Array4<const Real>& dp,
+                 int i, int j, int k) noexcept
+{
+    Real sum = 0.0_rt;
+    for (int n = 0; n < NSpecies; ++n) {
+        Real dpy = compute_dpy(qp, dp, i, j, k, n);
+        sum += dpy * qp(i, j, k, QH + n);
+    }
+    return sum;
+}
+
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 Real central_diff(const Array4<const Real>& arr,
@@ -353,6 +514,233 @@ Real compute_species_flux_face(int dir,
 }
 
 } // namespace
+
+namespace {
+
+void add_diffusive_part2(const Geometry& geom,
+                         const MultiFab& prim,
+                         const MultiFab& mu,
+                         const MultiFab& xi,
+                         const MultiFab& lam,
+                         const MultiFab& Ddiag,
+                         MultiFab& rhs)
+{
+    const auto dxinv = geom.InvCellSizeArray();
+    GpuArray<Real, AMREX_SPACEDIM> dx2inv;
+    for (int d = 0; d < AMREX_SPACEDIM; ++d) {
+        dx2inv[d] = dxinv[d] * dxinv[d];
+    }
+
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
+    for (MFIter mfi(rhs, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+        const Box& bx = mfi.tilebox();
+        auto rp = rhs.array(mfi);
+        auto qp = prim.const_array(mfi);
+        auto mup = mu.const_array(mfi);
+        auto xip = xi.const_array(mfi);
+        auto lamp = lam.const_array(mfi);
+        auto dp = Ddiag.const_array(mfi);
+
+        for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
+            const int idir = dir;
+            const Box nodal = amrex::surroundingNodes(bx, idir);
+            FArrayBox flux_fab(nodal, NCons);
+            flux_fab.setVal<RunOn::Device>(0.0);
+            auto flux = flux_fab.array();
+            [[maybe_unused]] auto flux_elix = flux_fab.elixir();
+
+            ParallelFor(nodal, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+                GpuArray<Real, NCons> face_flux;
+                for (int comp = 0; comp < NCons; ++comp) {
+                    face_flux[comp] = 0.0_rt;
+                }
+
+                auto vsp_accessor = [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    return compute_vsp(mup, xip, ii, jj, kk);
+                };
+                auto mu_accessor = [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    return mup(ii, jj, kk, 0);
+                };
+                auto lam_accessor = [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    return lamp(ii, jj, kk, 0);
+                };
+                auto pres_accessor = [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    return qp(ii, jj, kk, QPRES);
+                };
+
+                GpuArray<Real, 8> mat_vsp = matmul_M8_line(idir, i, j, k, vsp_accessor);
+                GpuArray<Real, 8> mat_mu = matmul_M8_line(idir, i, j, k, mu_accessor);
+                GpuArray<Real, 8> mat_lam = matmul_M8_line(idir, i, j, k, lam_accessor);
+                GpuArray<Real, 8> mat_pres = matmul_M8T_line(idir, i, j, k, pres_accessor);
+
+                auto dot_with_comp = [&](const GpuArray<Real, 8>& coeffs,
+                                         int comp) noexcept -> Real {
+                    Real sum = 0.0_rt;
+                    for (int idx = 0; idx < 8; ++idx) {
+                        int ii = i;
+                        int jj = j;
+                        int kk = k;
+                        apply_offset(idir, idx - 4, ii, jj, kk);
+                        sum += coeffs[idx] * qp(ii, jj, kk, comp);
+                    }
+                    return sum;
+                };
+
+                auto dot_arrays = [&](const GpuArray<Real, 8>& a,
+                                      const GpuArray<Real, 8>& b) noexcept -> Real {
+                    Real sum = 0.0_rt;
+                    for (int idx = 0; idx < 8; ++idx) {
+                        sum += a[idx] * b[idx];
+                    }
+                    return sum;
+                };
+
+                int normal_mom = kMomentumIndex[idir];
+                int normal_vel = kVelocityIndex[idir];
+                face_flux[normal_mom] += dot_with_comp(mat_vsp, normal_vel);
+
+                for (int t = 0; t < AMREX_SPACEDIM; ++t) {
+                    if (t == idir) {
+                        continue;
+                    }
+                    int mom_comp = kMomentumIndex[t];
+                    int vel_comp = kVelocityIndex[t];
+                    face_flux[mom_comp] += dot_with_comp(mat_mu, vel_comp);
+                }
+
+                face_flux[UEDEN] += dot_with_comp(mat_lam, QTEMP);
+
+                GpuArray<Real, 8> dpe_line;
+                gather_line(idir, i, j, k,
+                    [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                        return compute_dpe(qp, dp, ii, jj, kk);
+                    },
+                    dpe_line);
+                face_flux[UEDEN] += dot_arrays(dpe_line, mat_pres);
+
+                for (int n = 0; n < NSpecies; ++n) {
+                    if (n == kInertSpecies) {
+                        continue;
+                    }
+                    const int comp = URY1 + n;
+
+                    GpuArray<Real, 8> dpy_line;
+                    gather_line(idir, i, j, k,
+                        [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                            return compute_dpy(qp, dp, ii, jj, kk, n);
+                        },
+                        dpy_line);
+                    face_flux[comp] += dot_arrays(dpy_line, mat_pres);
+
+                    auto qx_accessor = [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                        return qp(ii, jj, kk, QX + n);
+                    };
+                    GpuArray<Real, 8> mat_qx = matmul_M8T_line(idir, i, j, k, qx_accessor);
+
+                    GpuArray<Real, 8> dxy_line;
+                    gather_line(idir, i, j, k,
+                        [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                            return dp(ii, jj, kk, n);
+                        },
+                        dxy_line);
+                    face_flux[comp] += dot_arrays(dxy_line, mat_qx);
+
+                    GpuArray<Real, 8> dxe_line;
+                    gather_line(idir, i, j, k,
+                        [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                            return compute_dxe(qp, dp, ii, jj, kk, n);
+                        },
+                        dxe_line);
+                    face_flux[UEDEN] += dot_arrays(dxe_line, mat_qx);
+                }
+
+                for (int comp = 0; comp < NCons; ++comp) {
+                    flux(i, j, k, comp) = face_flux[comp];
+                }
+            });
+
+            FArrayBox sumdry_fab(bx, 1);
+            sumdry_fab.setVal<RunOn::Device>(0.0);
+            auto sumdry = sumdry_fab.array();
+            [[maybe_unused]] auto sumdry_elix = sumdry_fab.elixir();
+
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+                for (int comp = UMX; comp <= UEDEN; ++comp) {
+                    Real flux_hi = get_face_flux(flux, idir, i, j, k, comp, 1);
+                    Real flux_lo = get_face_flux(flux, idir, i, j, k, comp, 0);
+                    rp(i, j, k, comp) += (flux_hi - flux_lo) * dx2inv[idir];
+                }
+            });
+
+            for (int n = 0; n < NSpecies; ++n) {
+                const int comp = URY1 + n;
+                const int inert_flag = (n == kInertSpecies) ? 1 : 0;
+                ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+                    Real flux_hi = get_face_flux(flux, idir, i, j, k, comp, 1);
+                    Real flux_lo = get_face_flux(flux, idir, i, j, k, comp, 0);
+                    Real div = (flux_hi - flux_lo) * dx2inv[idir];
+                    rp(i, j, k, comp) += div;
+                    if (inert_flag == 0) {
+                        sumdry(i, j, k) += div;
+                    }
+                });
+            }
+
+            FArrayBox gradp_fab(bx, 1);
+            gradp_fab.setVal<RunOn::Device>(0.0);
+            auto gradp = gradp_fab.array();
+            [[maybe_unused]] auto gradp_elix = gradp_fab.elixir();
+
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+                gradp(i, j, k) = central_diff(qp, QPRES, i, j, k, idir, dxinv);
+            });
+
+            FArrayBox sumryv_fab(bx, 1);
+            sumryv_fab.setVal<RunOn::Device>(0.0);
+            auto sumryv = sumryv_fab.array();
+            [[maybe_unused]] auto sumryv_elix = sumryv_fab.elixir();
+
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+                Real accum = 0.0_rt;
+                for (int n = 0; n < NSpecies; ++n) {
+                    if (n == kInertSpecies) {
+                        continue;
+                    }
+                    Real dpy_val = compute_dpy(qp, dp, i, j, k, n);
+                    Real grad_qx = central_diff(qp, QX + n, i, j, k, idir, dxinv);
+                    accum += dpy_val * gradp(i, j, k) + dp(i, j, k, n) * grad_qx;
+                }
+                sumryv(i, j, k) = accum;
+            });
+
+            ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+                Real sumdry_val = sumdry(i, j, k);
+                Real sumryv_val = sumryv(i, j, k);
+                Real qh = qp(i, j, k, QH + kInertSpecies);
+                Real grad_qh = central_diff(qp, QH + kInertSpecies, i, j, k, idir, dxinv);
+                Real corr = sumdry_val * qh + sumryv_val * grad_qh;
+                rp(i, j, k, UEDEN) -= corr;
+                rp(i, j, k, URY1 + kInertSpecies) -= sumdry_val;
+            });
+        }
+    }
+}
+
+} // namespace
+
+void AddDiffusive(const Geometry& geom,
+                  const MultiFab& prim,
+                  const MultiFab& mu,
+                  const MultiFab& xi,
+                  const MultiFab& lam,
+                  const MultiFab& Ddiag,
+                  MultiFab& rhs)
+{
+    add_diffusive_part1(geom, prim, mu, xi, lam, Ddiag, rhs);
+    add_diffusive_part2(geom, prim, mu, xi, lam, Ddiag, rhs);
+}
 
 void InitData(const Geometry& geom,
               MultiFab& state,
@@ -748,13 +1136,15 @@ void AddHyperbolic(const Geometry& geom,
     }
 }
 
-void AddDiffusive(const Geometry& geom,
-                  const MultiFab& prim,
-                  const MultiFab& mu,
-                  const MultiFab& xi,
-                  const MultiFab& lam,
-                  const MultiFab& Ddiag,
-                  MultiFab& rhs)
+namespace {
+
+void add_diffusive_part1(const Geometry& geom,
+                         const MultiFab& prim,
+                         const MultiFab& mu,
+                         const MultiFab& xi,
+                         const MultiFab& lam,
+                         const MultiFab& Ddiag,
+                         MultiFab& rhs)
 {
     const auto dxinv = geom.InvCellSizeArray();
 
@@ -889,6 +1279,8 @@ void AddDiffusive(const Geometry& geom,
         });
     }
 }
+
+} // namespace
 
 void ComputeCourant(const Geometry& geom,
                     const MultiFab& prim,
