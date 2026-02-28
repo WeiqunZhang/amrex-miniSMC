@@ -1,5 +1,6 @@
 #include "SMCKernels.H"
 
+#include <AMReX_Arena.H>
 #include <AMReX_FArrayBox.H>
 #include <AMReX_Geometry.H>
 #include <AMReX_Math.H>
@@ -546,10 +547,9 @@ void add_diffusive_part2(const Geometry& geom,
         for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
             const int idir = dir;
             const Box nodal = amrex::surroundingNodes(bx, idir);
-            FArrayBox flux_fab(nodal, NCons);
+            FArrayBox flux_fab(nodal, NCons, The_Async_Arena());
             flux_fab.setVal<RunOn::Device>(0.0);
             auto flux = flux_fab.array();
-            [[maybe_unused]] auto flux_elix = flux_fab.elixir();
 
             ParallelFor(nodal, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
                 GpuArray<Real, NCons> face_flux;
@@ -661,10 +661,9 @@ void add_diffusive_part2(const Geometry& geom,
                 }
             });
 
-            FArrayBox sumdry_fab(bx, 1);
+            FArrayBox sumdry_fab(bx, 1, The_Async_Arena());
             sumdry_fab.setVal<RunOn::Device>(0.0);
             auto sumdry = sumdry_fab.array();
-            [[maybe_unused]] auto sumdry_elix = sumdry_fab.elixir();
 
             ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
                 for (int comp = UMX; comp <= UEDEN; ++comp) {
@@ -688,19 +687,17 @@ void add_diffusive_part2(const Geometry& geom,
                 });
             }
 
-            FArrayBox gradp_fab(bx, 1);
+            FArrayBox gradp_fab(bx, 1, The_Async_Arena());
             gradp_fab.setVal<RunOn::Device>(0.0);
             auto gradp = gradp_fab.array();
-            [[maybe_unused]] auto gradp_elix = gradp_fab.elixir();
 
             ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
                 gradp(i, j, k) = central_diff(qp, QPRES, i, j, k, idir, dxinv);
             });
 
-            FArrayBox sumryv_fab(bx, 1);
+            FArrayBox sumryv_fab(bx, 1, The_Async_Arena());
             sumryv_fab.setVal<RunOn::Device>(0.0);
             auto sumryv = sumryv_fab.array();
-            [[maybe_unused]] auto sumryv_elix = sumryv_fab.elixir();
 
             ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
                 Real accum = 0.0_rt;
