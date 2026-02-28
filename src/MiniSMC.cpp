@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <string>
 
 using namespace amrex;
 
@@ -54,15 +55,36 @@ MiniSMC::MiniSMC()
 void MiniSMC::read_parameters()
 {
     ParmParse pp("smc");
+    ParmParse pp_all;
+
+    auto query_value = [&] (const std::string& name, auto& value) {
+        if (pp.query(name.c_str(), value)) {
+            return true;
+        }
+        return pp_all.query(name.c_str(), value) ? true : false;
+    };
+
+    auto get_array_if_present = [&] (const std::string& name, auto& vec) {
+        const int ncomp = static_cast<int>(vec.size());
+        if (pp.countval(name.c_str()) > 0) {
+            pp.getarr(name.c_str(), vec, 0, ncomp);
+            return true;
+        }
+        if (pp_all.countval(name.c_str()) > 0) {
+            pp_all.getarr(name.c_str(), vec, 0, ncomp);
+            return true;
+        }
+        return false;
+    };
 
     Vector<int> n_cell(AMREX_SPACEDIM, -1);
-    if (pp.contains("n_cell")) {
-        pp.getarr("n_cell", n_cell, 0, AMREX_SPACEDIM);
+    if (get_array_if_present("n_cell", n_cell)) {
+        // values already filled
     } else {
-        pp.query("n_cellx", n_cell[0]);
-        pp.query("n_celly", n_cell[1]);
+        query_value("n_cellx", n_cell[0]);
+        query_value("n_celly", n_cell[1]);
 #if (AMREX_SPACEDIM == 3)
-        pp.query("n_cellz", n_cell[2]);
+        query_value("n_cellz", n_cell[2]);
 #endif
     }
     for (int d = 0; d < AMREX_SPACEDIM; ++d) {
@@ -71,37 +93,37 @@ void MiniSMC::read_parameters()
         }
     }
 
-    pp.query("max_grid_size", m_prob.max_grid_size);
-    pp.query("max_step", m_prob.max_step);
-    pp.query("stop_time", m_prob.stop_time);
-    pp.query("cflfac", m_prob.cfl);
-    pp.query("cfl_int", m_prob.cfl_int);
-    pp.query("init_shrink", m_prob.init_shrink);
-    pp.query("small_dt", m_prob.small_dt);
-    pp.query("max_dt_growth", m_prob.max_dt_growth);
-    pp.query("max_dt", m_prob.max_dt);
-    pp.query("fixed_dt", m_prob.fixed_dt);
-    pp.query("verbose", m_prob.verbose);
-    pp.query("rfire", m_prob.rfire);
+    query_value("max_grid_size", m_prob.max_grid_size);
+    query_value("max_step", m_prob.max_step);
+    query_value("stop_time", m_prob.stop_time);
+    query_value("cflfac", m_prob.cfl);
+    query_value("cfl_int", m_prob.cfl_int);
+    query_value("init_shrink", m_prob.init_shrink);
+    query_value("small_dt", m_prob.small_dt);
+    query_value("max_dt_growth", m_prob.max_dt_growth);
+    query_value("max_dt", m_prob.max_dt);
+    query_value("fixed_dt", m_prob.fixed_dt);
+    query_value("verbose", m_prob.verbose);
+    query_value("rfire", m_prob.rfire);
 
-    Vector<Real> plo(AMREX_SPACEDIM);
-    Vector<Real> phi(AMREX_SPACEDIM);
-    if (pp.contains("prob_lo")) {
-        pp.getarr("prob_lo", plo, 0, AMREX_SPACEDIM);
+    Vector<Real> plo(AMREX_SPACEDIM, 0.0_rt);
+    Vector<Real> phi(AMREX_SPACEDIM, 1.0_rt);
+    if (get_array_if_present("prob_lo", plo)) {
+        // already set
     } else {
-        pp.query("prob_lo_x", plo[0]);
-        pp.query("prob_lo_y", plo[1]);
+        query_value("prob_lo_x", plo[0]);
+        query_value("prob_lo_y", plo[1]);
 #if (AMREX_SPACEDIM == 3)
-        pp.query("prob_lo_z", plo[2]);
+        query_value("prob_lo_z", plo[2]);
 #endif
     }
-    if (pp.contains("prob_hi")) {
-        pp.getarr("prob_hi", phi, 0, AMREX_SPACEDIM);
+    if (get_array_if_present("prob_hi", phi)) {
+        // already set
     } else {
-        pp.query("prob_hi_x", phi[0]);
-        pp.query("prob_hi_y", phi[1]);
+        query_value("prob_hi_x", phi[0]);
+        query_value("prob_hi_y", phi[1]);
 #if (AMREX_SPACEDIM == 3)
-        pp.query("prob_hi_z", phi[2]);
+        query_value("prob_hi_z", phi[2]);
 #endif
     }
 
