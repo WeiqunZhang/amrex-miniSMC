@@ -21,7 +21,7 @@ using Real = amrex::Real;
 constexpr int NSpecies = 9;
 constexpr int NCons = 5 + NSpecies;
 constexpr int NPrim = 7 + 3 * NSpecies;
-constexpr int StencilNG = 8;
+constexpr int StencilNG = 4;
 
 struct ProbParm {
     amrex::IntVect ncell{AMREX_D_DECL(128, 128, 128)};
