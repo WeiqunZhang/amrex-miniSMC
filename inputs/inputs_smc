@@ -22,6 +22,7 @@ prob.prob_hi = 5.0e-2 5.0e-2 5.0e-2
 prob.rfire = 1.0e-2
 
 # Plotfiles
+smc.plotfile_enable = 1   # toggle to 0 to disable all plot output
 smc.plot_file = plt
 smc.plot_int = 5
 smc.plot_init = 1

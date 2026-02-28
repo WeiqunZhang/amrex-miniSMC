@@ -53,7 +53,7 @@ All parameters from the original `inputs_SMC` namelist are supported via plain A
 
 ### Plotfiles
 
-Set `smc.plot_int` (write every N steps) or `smc.plot_deltat` (write every Δt seconds) to enable AMReX plotfile output. Optional helpers:
+Set `smc.plotfile_enable = 0` to globally disable plot output. Otherwise, choose a cadence via `smc.plot_int` (write every N steps) or `smc.plot_deltat` (write every Δt seconds). Optional helpers:
 
 - `smc.plot_file` – base directory name (default `plt`).
 - `smc.plot_init` – set to 1 to dump the initialized state.

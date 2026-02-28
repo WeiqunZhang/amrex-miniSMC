@@ -38,6 +38,7 @@ struct ProbParm {
     Real max_dt = 1.0e33;
     Real fixed_dt = -1.0;
     Real rfire = 0.01;
+    int plotfile_enable = 1;
     int plot_int = -1;
     int plot_init = 0;
     int plot_final = 0;

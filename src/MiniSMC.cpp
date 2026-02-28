@@ -53,7 +53,7 @@ MiniSMC::MiniSMC()
     read_parameters();
     build_mesh();
     m_plot_var_names = build_plot_var_names();
-    if (m_prob.plot_deltat > 0.0_rt) {
+    if (m_prob.plotfile_enable > 0 && m_prob.plot_deltat > 0.0_rt) {
         m_next_plot_time = m_prob.plot_deltat;
     }
 }
@@ -122,6 +122,7 @@ void MiniSMC::read_parameters()
     query_value("fixed_dt", m_prob.fixed_dt);
     query_value("verbose", m_prob.verbose);
     query_value("rfire", m_prob.rfire);
+    query_value("plotfile_enable", m_prob.plotfile_enable);
     query_value("plot_int", m_prob.plot_int);
     query_value("plot_deltat", m_prob.plot_deltat);
     query_value("plot_init", m_prob.plot_init);
@@ -215,7 +216,7 @@ void MiniSMC::Evolve()
 
     InitData();
 
-    if (m_prob.plot_init > 0) {
+    if (m_prob.plotfile_enable > 0 && m_prob.plot_init > 0) {
         write_plotfile(0);
     }
 
@@ -249,7 +250,8 @@ void MiniSMC::Evolve()
             }
         }
     }
-    if (m_prob.plot_final > 0 && took_step && m_last_plotfile_step != last_istep) {
+    if (m_prob.plotfile_enable > 0 && m_prob.plot_final > 0 && took_step &&
+        m_last_plotfile_step != last_istep) {
         write_plotfile(last_istep);
     }
 
@@ -372,7 +374,8 @@ void MiniSMC::set_dt(Real courno, int istep)
 
 void MiniSMC::maybe_write_plotfile(int istep)
 {
-    if (m_prob.plot_int <= 0 && m_prob.plot_deltat <= 0.0_rt) {
+    if (m_prob.plotfile_enable <= 0 ||
+        (m_prob.plot_int <= 0 && m_prob.plot_deltat <= 0.0_rt)) {
         return;
     }
 
@@ -396,6 +399,10 @@ void MiniSMC::maybe_write_plotfile(int istep)
 
 void MiniSMC::write_plotfile(int istep)
 {
+    if (m_prob.plotfile_enable <= 0) {
+        return;
+    }
+
     if (m_plot_var_names.empty()) {
         m_plot_var_names = build_plot_var_names();
     }
