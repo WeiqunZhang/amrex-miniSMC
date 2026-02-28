@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 option(MINISMC_USE_SUPERBUILD "Build AMReX from an in-tree source checkout" OFF)
-option(MINISMC_DISABLE_CCACHE "Force-disable ccache to avoid permission issues on shared runners" ON)
+option(MINISMC_DISABLE_CCACHE "Force-disable ccache to avoid permission issues on shared runners" OFF)
 set(AMREX_SOURCE_DIR "" CACHE PATH "Path to the AMReX source tree (used when super-building)")
 
 if(MINISMC_DISABLE_CCACHE)
