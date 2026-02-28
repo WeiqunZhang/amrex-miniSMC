@@ -100,7 +100,6 @@ private:
 
     amrex::GpuArray<Real, AMREX_SPACEDIM> m_dx{{AMREX_D_DECL(0.0, 0.0, 0.0)}};
     amrex::Vector<std::string> m_plot_var_names;
-    int m_plotfile_index = 0;
     int m_last_plotfile_step = -1;
     Real m_next_plot_time = -1.0;
 };

@@ -376,14 +376,19 @@ void MiniSMC::maybe_write_plotfile(int istep)
         return;
     }
 
+    bool wrote_this_step = false;
     if (m_prob.plot_int > 0 && istep > 0 && (istep % m_prob.plot_int) == 0) {
         write_plotfile(istep);
+        wrote_this_step = true;
     }
 
     if (m_prob.plot_deltat > 0.0_rt && m_next_plot_time > 0.0_rt) {
         constexpr Real eps = 1.0e-12_rt;
-        while (m_time + eps >= m_next_plot_time) {
+        if ((m_time + eps >= m_next_plot_time) && !wrote_this_step) {
             write_plotfile(istep);
+            wrote_this_step = true;
+        }
+        while (m_time + eps >= m_next_plot_time) {
             m_next_plot_time += m_prob.plot_deltat;
         }
     }
@@ -395,14 +400,13 @@ void MiniSMC::write_plotfile(int istep)
         m_plot_var_names = build_plot_var_names();
     }
 
-    const std::string plt = amrex::Concatenate(m_prob.plot_file, m_plotfile_index, 5);
+    const std::string plt = amrex::Concatenate(m_prob.plot_file, istep, 5);
     amrex::WriteSingleLevelPlotfile(plt, m_state, m_plot_var_names, m_geom, m_time, istep);
 
     if (ParallelDescriptor::IOProcessor() && m_prob.verbose > 0) {
         amrex::Print() << "Wrote plotfile " << plt << " at time " << m_time << std::endl;
     }
 
-    ++m_plotfile_index;
     m_last_plotfile_step = istep;
 }
 
