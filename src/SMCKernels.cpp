@@ -116,6 +116,32 @@ Real face_deriv(const Array4<const Real>& arr,
     return sum * dxinv;
 }
 
+AMREX_GPU_DEVICE AMREX_FORCE_INLINE
+Real face_tangential_deriv(const Array4<const Real>& arr,
+                           int comp,
+                           int face_dir,
+                           int deriv_dir,
+                           int i, int j, int k,
+                           const GpuArray<Real, AMREX_SPACEDIM>& dxinv) noexcept
+{
+    Real sum = 0.0_rt;
+    for (int m = 0; m < 4; ++m) {
+        int offset = m + 1;
+        int ii_hi = i;
+        int jj_hi = j;
+        int kk_hi = k;
+        int ii_lo = i;
+        int jj_lo = j;
+        int kk_lo = k;
+        apply_offset(deriv_dir, offset, ii_hi, jj_hi, kk_hi);
+        apply_offset(deriv_dir, -offset, ii_lo, jj_lo, kk_lo);
+        Real hi = face_interp(arr, comp, face_dir, ii_hi, jj_hi, kk_hi);
+        Real lo = face_interp(arr, comp, face_dir, ii_lo, jj_lo, kk_lo);
+        sum += d8_coeff(m) * (hi - lo);
+    }
+    return sum * dxinv[deriv_dir];
+}
+
 enum ConsComp { URHO = 0, UMX, UMY, UMZ, UEDEN, URY1 };
 enum PrimComp { QRHO = 0, QU, QV, QW, QPRES, QTEMP, QEINT, QY = 7 };
 constexpr int QX = QY + NSpecies;
@@ -209,16 +235,15 @@ void compute_tau_face_x(int i, int j, int k,
                         const Array4<const Real>& qp,
                         const Array4<const Real>& mu,
                         const Array4<const Real>& xi,
-                        const Array4<const Real>& grad,
                         const GpuArray<Real, AMREX_SPACEDIM>& dxinv,
                         Real& tau_xx, Real& tau_xy, Real& tau_xz) noexcept
 {
     Real mu_face = face_interp(mu, 0, 0, i, j, k);
     Real xi_face = face_interp(xi, 0, 0, i, j, k);
     Real dudx = face_deriv(qp, QU, 0, i, j, k, dxinv[0]);
-    Real dvdy = face_interp(grad, DVDY, 0, i, j, k);
+    Real dvdy = face_tangential_deriv(qp, QV, 0, 1, i, j, k, dxinv);
 #if (AMREX_SPACEDIM == 3)
-    Real dwdz = face_interp(grad, DWDZ, 0, i, j, k);
+    Real dwdz = face_tangential_deriv(qp, QW, 0, 2, i, j, k, dxinv);
 #else
     Real dwdz = 0.0_rt;
 #endif
@@ -227,12 +252,12 @@ void compute_tau_face_x(int i, int j, int k,
     tau_xx = 2.0_rt * mu_face * dudx + bulk * divu;
 
     Real dvdx = face_deriv(qp, QV, 0, i, j, k, dxinv[0]);
-    Real dudy = face_interp(grad, DUDY, 0, i, j, k);
+    Real dudy = face_tangential_deriv(qp, QU, 0, 1, i, j, k, dxinv);
     tau_xy = mu_face * (dudy + dvdx);
 
 #if (AMREX_SPACEDIM == 3)
     Real dwdx = face_deriv(qp, QW, 0, i, j, k, dxinv[0]);
-    Real dudz = face_interp(grad, DUDZ, 0, i, j, k);
+    Real dudz = face_tangential_deriv(qp, QU, 0, 2, i, j, k, dxinv);
     tau_xz = mu_face * (dudz + dwdx);
 #else
     tau_xz = 0.0_rt;
@@ -244,16 +269,15 @@ void compute_tau_face_y(int i, int j, int k,
                         const Array4<const Real>& qp,
                         const Array4<const Real>& mu,
                         const Array4<const Real>& xi,
-                        const Array4<const Real>& grad,
                         const GpuArray<Real, AMREX_SPACEDIM>& dxinv,
                         Real& tau_yx, Real& tau_yy, Real& tau_yz) noexcept
 {
     Real mu_face = face_interp(mu, 0, 1, i, j, k);
     Real xi_face = face_interp(xi, 0, 1, i, j, k);
     Real dvdy = face_deriv(qp, QV, 1, i, j, k, dxinv[1]);
-    Real dudx = face_interp(grad, DUDX, 1, i, j, k);
+    Real dudx = face_tangential_deriv(qp, QU, 1, 0, i, j, k, dxinv);
 #if (AMREX_SPACEDIM == 3)
-    Real dwdz = face_interp(grad, DWDZ, 1, i, j, k);
+    Real dwdz = face_tangential_deriv(qp, QW, 1, 2, i, j, k, dxinv);
 #else
     Real dwdz = 0.0_rt;
 #endif
@@ -261,12 +285,12 @@ void compute_tau_face_y(int i, int j, int k,
     Real bulk = xi_face - (2.0_rt / 3.0_rt) * mu_face;
     tau_yy = 2.0_rt * mu_face * dvdy + bulk * divu;
 
-    Real dvdx = face_interp(grad, DVDX, 1, i, j, k);
+    Real dvdx = face_tangential_deriv(qp, QV, 1, 0, i, j, k, dxinv);
     Real dudy = face_deriv(qp, QU, 1, i, j, k, dxinv[1]);
     tau_yx = mu_face * (dvdx + dudy);
 
 #if (AMREX_SPACEDIM == 3)
-    Real dvdz = face_interp(grad, DVDZ, 1, i, j, k);
+    Real dvdz = face_tangential_deriv(qp, QV, 1, 2, i, j, k, dxinv);
     Real dwdy = face_deriv(qp, QW, 1, i, j, k, dxinv[1]);
     tau_yz = mu_face * (dvdz + dwdy);
 #else
@@ -280,24 +304,23 @@ void compute_tau_face_z(int i, int j, int k,
                         const Array4<const Real>& qp,
                         const Array4<const Real>& mu,
                         const Array4<const Real>& xi,
-                        const Array4<const Real>& grad,
                         const GpuArray<Real, AMREX_SPACEDIM>& dxinv,
                         Real& tau_zx, Real& tau_zy, Real& tau_zz) noexcept
 {
     Real mu_face = face_interp(mu, 0, 2, i, j, k);
     Real xi_face = face_interp(xi, 0, 2, i, j, k);
     Real dwdz = face_deriv(qp, QW, 2, i, j, k, dxinv[2]);
-    Real dudx = face_interp(grad, DUDX, 2, i, j, k);
-    Real dvdy = face_interp(grad, DVDY, 2, i, j, k);
+    Real dudx = face_tangential_deriv(qp, QU, 2, 0, i, j, k, dxinv);
+    Real dvdy = face_tangential_deriv(qp, QV, 2, 1, i, j, k, dxinv);
     Real divu = dudx + dvdy + dwdz;
     Real bulk = xi_face - (2.0_rt / 3.0_rt) * mu_face;
     tau_zz = 2.0_rt * mu_face * dwdz + bulk * divu;
 
-    Real dwdx = face_interp(grad, DWDX, 2, i, j, k);
+    Real dwdx = face_tangential_deriv(qp, QW, 2, 0, i, j, k, dxinv);
     Real dudz = face_deriv(qp, QU, 2, i, j, k, dxinv[2]);
     tau_zx = mu_face * (dwdx + dudz);
 
-    Real dwdy = face_interp(grad, DWDY, 2, i, j, k);
+    Real dwdy = face_tangential_deriv(qp, QW, 2, 1, i, j, k, dxinv);
     Real dvdz = face_deriv(qp, QV, 2, i, j, k, dxinv[2]);
     tau_zy = mu_face * (dwdy + dvdz);
 }
@@ -740,7 +763,6 @@ void AddDiffusive(const Geometry& geom,
 #endif
     for (MFIter mfi(rhs, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
-        const Box& gbx = mfi.growntilebox(StencilNG);
         auto rp = rhs.array(mfi);
         auto qp = prim.const_array(mfi);
         auto mup = mu.const_array(mfi);
@@ -748,55 +770,27 @@ void AddDiffusive(const Geometry& geom,
         auto lamp = lam.const_array(mfi);
         auto dp = Ddiag.const_array(mfi);
 
-        FArrayBox grad_fab(gbx, 9);
-        auto grad = grad_fab.array();
-        Elixir grad_eli = grad_fab.elixir();
-
-        ParallelFor(gbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-            grad(i, j, k, DUDX) = central_diff(qp, QU, i, j, k, 0, dxinv);
-            grad(i, j, k, DUDY) = central_diff(qp, QU, i, j, k, 1, dxinv);
-#if (AMREX_SPACEDIM == 3)
-            grad(i, j, k, DUDZ) = central_diff(qp, QU, i, j, k, 2, dxinv);
-#else
-            grad(i, j, k, DUDZ) = 0.0_rt;
-#endif
-            grad(i, j, k, DVDX) = central_diff(qp, QV, i, j, k, 0, dxinv);
-            grad(i, j, k, DVDY) = central_diff(qp, QV, i, j, k, 1, dxinv);
-#if (AMREX_SPACEDIM == 3)
-            grad(i, j, k, DVDZ) = central_diff(qp, QV, i, j, k, 2, dxinv);
-#else
-            grad(i, j, k, DVDZ) = 0.0_rt;
-#endif
-            grad(i, j, k, DWDX) = central_diff(qp, QW, i, j, k, 0, dxinv);
-            grad(i, j, k, DWDY) = central_diff(qp, QW, i, j, k, 1, dxinv);
-#if (AMREX_SPACEDIM == 3)
-            grad(i, j, k, DWDZ) = central_diff(qp, QW, i, j, k, 2, dxinv);
-#else
-            grad(i, j, k, DWDZ) = 0.0_rt;
-#endif
-        });
-
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
             Real tau_xx_hi, tau_xy_hi, tau_xz_hi;
             Real tau_xx_lo, tau_xy_lo, tau_xz_lo;
-            compute_tau_face_x(i, j, k, qp, mup, xip, grad, dxinv,
+            compute_tau_face_x(i, j, k, qp, mup, xip, dxinv,
                                tau_xx_hi, tau_xy_hi, tau_xz_hi);
-            compute_tau_face_x(i - 1, j, k, qp, mup, xip, grad, dxinv,
+            compute_tau_face_x(i - 1, j, k, qp, mup, xip, dxinv,
                                tau_xx_lo, tau_xy_lo, tau_xz_lo);
 
             Real tau_yx_hi, tau_yy_hi, tau_yz_hi;
             Real tau_yx_lo, tau_yy_lo, tau_yz_lo;
-            compute_tau_face_y(i, j, k, qp, mup, xip, grad, dxinv,
+            compute_tau_face_y(i, j, k, qp, mup, xip, dxinv,
                                tau_yx_hi, tau_yy_hi, tau_yz_hi);
-            compute_tau_face_y(i, j - 1, k, qp, mup, xip, grad, dxinv,
+            compute_tau_face_y(i, j - 1, k, qp, mup, xip, dxinv,
                                tau_yx_lo, tau_yy_lo, tau_yz_lo);
 
 #if (AMREX_SPACEDIM == 3)
             Real tau_zx_hi, tau_zy_hi, tau_zz_hi;
             Real tau_zx_lo, tau_zy_lo, tau_zz_lo;
-            compute_tau_face_z(i, j, k, qp, mup, xip, grad, dxinv,
+            compute_tau_face_z(i, j, k, qp, mup, xip, dxinv,
                                tau_zx_hi, tau_zy_hi, tau_zz_hi);
-            compute_tau_face_z(i, j, k - 1, qp, mup, xip, grad, dxinv,
+            compute_tau_face_z(i, j, k - 1, qp, mup, xip, dxinv,
                                tau_zx_lo, tau_zy_lo, tau_zz_lo);
 #else
             Real tau_zx_hi = 0.0_rt, tau_zx_lo = 0.0_rt;
