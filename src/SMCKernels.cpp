@@ -14,8 +14,14 @@ using namespace amrex;
 
 namespace {
 constexpr Real kRu = 8.31446261815324e+07_rt;
-constexpr GpuArray<Real, 4> D8Coeffs{
-    {0.8_rt, -0.2_rt, 4.0_rt / 105.0_rt, -1.0_rt / 280.0_rt}};
+
+AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
+Real d8_coeff(int idx) noexcept
+{
+    constexpr Real coeffs[4] = {
+        0.8_rt, -0.2_rt, 4.0_rt / 105.0_rt, -1.0_rt / 280.0_rt};
+    return coeffs[idx];
+}
 
 enum ConsComp { URHO = 0, UMX, UMY, UMZ, UEDEN, URY1 };
 enum PrimComp { QRHO = 0, QU, QV, QW, QPRES, QTEMP, QEINT, QY = 7 };
@@ -32,7 +38,7 @@ Real central_diff(const Array4<const Real>& arr,
     Real sum = 0.0_rt;
     for (int m = 0; m < 4; ++m) {
         const int offset = m + 1;
-        const Real coeff = D8Coeffs[m];
+        const Real coeff = d8_coeff(m);
         if (dir == 0) {
             sum += coeff * (arr(i + offset, j, k, comp) - arr(i - offset, j, k, comp));
         } else if (dir == 1) {
@@ -54,7 +60,7 @@ Real central_diff_fn(int i, int j, int k,
     Real sum = 0.0_rt;
     for (int m = 0; m < 4; ++m) {
         const int offset = m + 1;
-        const Real coeff = D8Coeffs[m];
+        const Real coeff = d8_coeff(m);
         if (dir == 0) {
             sum += coeff * (func(i + offset, j, k) - func(i - offset, j, k));
         } else if (dir == 1) {
