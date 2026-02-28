@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 option(MINISMC_USE_SUPERBUILD "Build AMReX from an in-tree source checkout" OFF)
 option(MINISMC_DISABLE_CCACHE "Force-disable ccache to avoid permission issues on shared runners" OFF)
+option(MINISMC_AUTO_GPU_ARCH "Detect GPU compute capability with nvidia-smi when targeting GPUs" ON)
 set(AMREX_SOURCE_DIR "" CACHE PATH "Path to the AMReX source tree (used when super-building)")
 
 if(MINISMC_DISABLE_CCACHE)
@@ -28,6 +29,31 @@ if(_gpu_backend STREQUAL "CUDA")
     set(CMAKE_CUDA_STANDARD 17)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     set(CMAKE_CUDA_EXTENSIONS OFF)
+
+    if(MINISMC_AUTO_GPU_ARCH AND NOT CMAKE_CUDA_ARCHITECTURES)
+        find_program(NVIDIA_SMI nvidia-smi)
+        if(NVIDIA_SMI)
+            execute_process(
+                COMMAND ${NVIDIA_SMI} --query-gpu=compute_cap --format=csv,noheader
+                OUTPUT_VARIABLE _smcaps
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET)
+            if(_smcaps)
+                string(REGEX MATCH "[0-9]+\\.[0-9]+" _first_cap "${_smcaps}")
+                if(_first_cap)
+                    string(REPLACE "." "" _arch "${_first_cap}")
+                    set(_arch_value "${_arch}")
+                    if(NOT _arch_value STREQUAL "")
+                        set(CMAKE_CUDA_ARCHITECTURES "${_arch_value}-real" CACHE STRING
+                            "CUDA SM architectures to target" FORCE)
+                        set(AMReX_CUDA_ARCH "${_arch_value}" CACHE STRING
+                            "AMReX CUDA architecture" FORCE)
+                        message(STATUS "Detected CUDA compute capability ${_first_cap}; using sm_${_arch_value} (no PTX fallback)")
+                    endif()
+                endif()
+            endif()
+        endif()
+    endif()
 elseif(_gpu_backend STREQUAL "HIP")
     enable_language(HIP)
     set(CMAKE_HIP_STANDARD 17)
