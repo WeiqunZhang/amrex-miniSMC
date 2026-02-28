@@ -11,11 +11,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
 #include <limits>
-#include <sstream>
 #include <string>
-#include <unordered_map>
 
 using namespace amrex;
 
@@ -47,18 +44,6 @@ constexpr Real TwoThirds = 2.0_rt / 3.0_rt;
 constexpr Real FourThirds = 4.0_rt / 3.0_rt;
 constexpr Real OneQuarter = 0.25_rt;
 constexpr Real ThreeQuarters = 0.75_rt;
-
-std::string g_input_file;
-}
-
-void MiniSMC::SetInputFilePath(const std::string& path)
-{
-    g_input_file = path;
-}
-
-const std::string& MiniSMC::GetInputFilePath()
-{
-    return g_input_file;
 }
 
 MiniSMC::MiniSMC()
@@ -73,69 +58,6 @@ void MiniSMC::read_parameters()
     ParmParse pp_all;
     ParmParse pp_prob("prob");
 
-    std::unordered_map<std::string, std::string> probin_values;
-    const std::string& input_file = MiniSMC::GetInputFilePath();
-    if (!input_file.empty()) {
-        std::ifstream ifs(input_file);
-        if (ifs.is_open()) {
-            bool in_namelist = false;
-            std::string line;
-            auto trim = [] (std::string s) {
-                auto first = s.find_first_not_of(" \t\r\n");
-                if (first == std::string::npos) {
-                    return std::string{};
-                }
-                auto last = s.find_last_not_of(" \t\r\n");
-                return s.substr(first, last - first + 1);
-            };
-            while (std::getline(ifs, line)) {
-                auto excl = line.find('!');
-                if (excl != std::string::npos) {
-                    line = line.substr(0, excl);
-                }
-                std::string stripped = trim(line);
-                if (stripped.empty()) {
-                    continue;
-                }
-                if (!in_namelist) {
-                    if (stripped.front() == '&') {
-                        in_namelist = true;
-                    }
-                    continue;
-                }
-                if (stripped.front() == '/') {
-                    break;
-                }
-                auto eq = stripped.find('=');
-                if (eq == std::string::npos) {
-                    continue;
-                }
-                std::string key = trim(stripped.substr(0, eq));
-                std::string value = trim(stripped.substr(eq + 1));
-                if (!key.empty() && !value.empty()) {
-                    probin_values[key] = value;
-                }
-            }
-        }
-    }
-    if (m_prob.verbose > 0 && amrex::ParallelDescriptor::IOProcessor()) {
-        amrex::Print() << "Parsed " << probin_values.size()
-                       << " entries from input file '" << input_file << "'\n";
-    }
-
-    auto parse_from_probin = [&] (const std::string& name, auto& value) {
-        auto it = probin_values.find(name);
-        if (it == probin_values.end()) {
-            return false;
-        }
-        std::string token = it->second;
-        std::replace(token.begin(), token.end(), 'D', 'E');
-        std::replace(token.begin(), token.end(), 'd', 'e');
-        std::istringstream is(token);
-        is >> value;
-        return static_cast<bool>(is);
-    };
-
     auto query_value = [&] (const std::string& name, auto& value) {
         if (pp.query(name.c_str(), value)) {
             return true;
@@ -144,9 +66,6 @@ void MiniSMC::read_parameters()
             return true;
         }
         if (pp_prob.query(name.c_str(), value)) {
-            return true;
-        }
-        if (parse_from_probin(name, value)) {
             return true;
         }
         return false;
@@ -164,17 +83,6 @@ void MiniSMC::read_parameters()
         }
         if (pp_prob.countval(name.c_str()) > 0) {
             pp_prob.getarr(name.c_str(), vec, 0, ncomp);
-            return true;
-        }
-        bool all_found = true;
-        for (int i = 0; i < ncomp; ++i) {
-            std::string indexed_name = name + "[" + std::to_string(i) + "]";
-            if (!parse_from_probin(indexed_name, vec[i])) {
-                all_found = false;
-                break;
-            }
-        }
-        if (all_found) {
             return true;
         }
         return false;

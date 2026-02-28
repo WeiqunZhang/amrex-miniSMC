@@ -8,7 +8,7 @@ This directory contains a C++ port of the legacy `miniSMC` solver that now uses 
 - `src/SMCKernels.H/.cpp` – data-parallel kernels for initialization, primitive variable conversion, chemistry, transport properties, hyperbolic terms, diffusion, and CFL calculation. Kernels rely on AMReX `ParallelFor` so they run on CPUs (OpenMP) or GPUs.
 - `src/Mechanism.H/.cpp` – LiDryer mechanism from PelePhysics (BSD-3). Provides thermodynamic/transport/chemistry functions that are GPU-ready.
 - `src/main.cpp` – program entry point.
-- `inputs/inputs_smc` – example input deck compatible with the original Fortran namelist parameters.
+- `inputs/inputs_smc` – example AMReX ParmParse input deck.
 - `CMakeLists.txt` – CMake build script.
 
 ## Building

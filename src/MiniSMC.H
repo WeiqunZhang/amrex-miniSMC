@@ -52,9 +52,6 @@ public:
     void InitData();
     void Evolve();
 
-    static void SetInputFilePath(const std::string& path);
-    static const std::string& GetInputFilePath();
-
 private:
     void read_parameters();
     void build_mesh();
