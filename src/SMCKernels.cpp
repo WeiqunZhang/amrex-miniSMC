@@ -14,6 +14,8 @@ using namespace amrex;
 
 namespace {
 constexpr Real kRu = 8.31446261815324e+07_rt;
+constexpr GpuArray<Real, 4> D8Coeffs{
+    {0.8_rt, -0.2_rt, 4.0_rt / 105.0_rt, -1.0_rt / 280.0_rt}};
 
 enum ConsComp { URHO = 0, UMX, UMY, UMZ, UEDEN, URY1 };
 enum PrimComp { QRHO = 0, QU, QV, QW, QPRES, QTEMP, QEINT, QY = 7 };
@@ -27,19 +29,19 @@ Real central_diff(const Array4<const Real>& arr,
                   int dir,
                   const GpuArray<Real, AMREX_SPACEDIM>& dxinv)
 {
-    Real forward = 0.0_rt;
-    Real backward = 0.0_rt;
-    if (dir == 0) {
-        forward = arr(i + 1, j, k, comp);
-        backward = arr(i - 1, j, k, comp);
-    } else if (dir == 1) {
-        forward = arr(i, j + 1, k, comp);
-        backward = arr(i, j - 1, k, comp);
-    } else {
-        forward = arr(i, j, k + 1, comp);
-        backward = arr(i, j, k - 1, comp);
+    Real sum = 0.0_rt;
+    for (int m = 0; m < 4; ++m) {
+        const int offset = m + 1;
+        const Real coeff = D8Coeffs[m];
+        if (dir == 0) {
+            sum += coeff * (arr(i + offset, j, k, comp) - arr(i - offset, j, k, comp));
+        } else if (dir == 1) {
+            sum += coeff * (arr(i, j + offset, k, comp) - arr(i, j - offset, k, comp));
+        } else {
+            sum += coeff * (arr(i, j, k + offset, comp) - arr(i, j, k - offset, comp));
+        }
     }
-    return 0.5_rt * (forward - backward) * dxinv[dir];
+    return sum * dxinv[dir];
 }
 
 template <typename F>
@@ -49,19 +51,19 @@ Real central_diff_fn(int i, int j, int k,
                      const GpuArray<Real, AMREX_SPACEDIM>& dxinv,
                      const F& func)
 {
-    Real forward = 0.0_rt;
-    Real backward = 0.0_rt;
-    if (dir == 0) {
-        forward = func(i + 1, j, k);
-        backward = func(i - 1, j, k);
-    } else if (dir == 1) {
-        forward = func(i, j + 1, k);
-        backward = func(i, j - 1, k);
-    } else {
-        forward = func(i, j, k + 1);
-        backward = func(i, j, k - 1);
+    Real sum = 0.0_rt;
+    for (int m = 0; m < 4; ++m) {
+        const int offset = m + 1;
+        const Real coeff = D8Coeffs[m];
+        if (dir == 0) {
+            sum += coeff * (func(i + offset, j, k) - func(i - offset, j, k));
+        } else if (dir == 1) {
+            sum += coeff * (func(i, j + offset, k) - func(i, j - offset, k));
+        } else {
+            sum += coeff * (func(i, j, k + offset) - func(i, j, k - offset));
+        }
     }
-    return 0.5_rt * (forward - backward) * dxinv[dir];
+    return sum * dxinv[dir];
 }
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
