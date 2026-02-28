@@ -61,7 +61,14 @@ void MiniSMC::read_parameters()
         if (pp.query(name.c_str(), value)) {
             return true;
         }
-        return pp_all.query(name.c_str(), value) ? true : false;
+        if (pp_all.query(name.c_str(), value)) {
+            return true;
+        }
+        const std::string prob_name = "prob." + name;
+        if (pp_all.query(prob_name.c_str(), value)) {
+            return true;
+        }
+        return false;
     };
 
     auto get_array_if_present = [&] (const std::string& name, auto& vec) {
@@ -72,6 +79,11 @@ void MiniSMC::read_parameters()
         }
         if (pp_all.countval(name.c_str()) > 0) {
             pp_all.getarr(name.c_str(), vec, 0, ncomp);
+            return true;
+        }
+        const std::string prob_name = "prob." + name;
+        if (pp_all.countval(prob_name.c_str()) > 0) {
+            pp_all.getarr(prob_name.c_str(), vec, 0, ncomp);
             return true;
         }
         return false;
