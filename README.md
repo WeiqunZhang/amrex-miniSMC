@@ -59,6 +59,8 @@ Set `smc.plotfile_enable = 0` to globally disable plot output. Otherwise, choose
 - `smc.plot_init` – set to 1 to dump the initialized state.
 - `smc.plot_final` – set to 1 to force a write after the final step if one was not triggered by the cadence.
 
+When running with multiple MPI ranks, the driver automatically reduces `smc.max_grid_size` (by powers of two) until there are at least as many boxes as MPI ranks, ensuring each rank owns work. You can still override `smc.max_grid_size` manually if you prefer a specific tiling.
+
 ## Notes and Limitations
 
 - The LiDryer mechanism is imported from the PelePhysics project (BSD-3 license). Cite PelePhysics if you redistribute the mechanism.

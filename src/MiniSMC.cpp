@@ -186,6 +186,26 @@ void MiniSMC::build_mesh()
 
     m_ba.define(domain);
     m_ba.maxSize(m_prob.max_grid_size);
+
+    const int nprocs = ParallelDescriptor::NProcs();
+    if (nprocs > 1) {
+        int effective_max = m_prob.max_grid_size;
+        auto need_more_boxes = [&] () { return m_ba.size() < nprocs; };
+        while (need_more_boxes() && effective_max > 1) {
+            effective_max = std::max(1, effective_max / 2);
+            m_ba.maxSize(effective_max);
+        }
+        if (effective_max != m_prob.max_grid_size) {
+            if (ParallelDescriptor::IOProcessor() && m_prob.verbose > 0) {
+                amrex::Print() << "Adjusted max_grid_size from "
+                               << m_prob.max_grid_size << " to "
+                               << effective_max
+                               << " to match " << nprocs
+                               << " MPI ranks\n";
+            }
+            m_prob.max_grid_size = effective_max;
+        }
+    }
     m_dm.define(m_ba);
 
     m_state.define(m_ba, m_dm, NCons, StencilNG);
