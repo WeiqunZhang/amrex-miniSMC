@@ -30,7 +30,7 @@ if(_gpu_backend STREQUAL "CUDA")
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     set(CMAKE_CUDA_EXTENSIONS OFF)
 
-    if(MINISMC_AUTO_GPU_ARCH AND NOT CMAKE_CUDA_ARCHITECTURES)
+    if(MINISMC_AUTO_GPU_ARCH)
         find_program(NVIDIA_SMI nvidia-smi)
         if(NVIDIA_SMI)
             execute_process(
@@ -52,6 +52,9 @@ if(_gpu_backend STREQUAL "CUDA")
                     endif()
                 endif()
             endif()
+        else()
+            message(WARNING "nvidia-smi not found; unable to auto-detect CUDA architecture. "
+                            "Consider setting CMAKE_CUDA_ARCHITECTURES manually.")
         endif()
     endif()
 elseif(_gpu_backend STREQUAL "HIP")
