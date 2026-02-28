@@ -1,12 +1,22 @@
 cmake_minimum_required(VERSION 3.24)
+
+option(MINISMC_USE_SUPERBUILD "Build AMReX from an in-tree source checkout" OFF)
+option(MINISMC_DISABLE_CCACHE "Force-disable ccache to avoid permission issues on shared runners" ON)
+set(AMREX_SOURCE_DIR "" CACHE PATH "Path to the AMReX source tree (used when super-building)")
+
+if(MINISMC_DISABLE_CCACHE)
+    set(ENV{CCACHE_DISABLE} 1)
+    set(ENV{CMAKE_C_COMPILER_LAUNCHER} "")
+    set(ENV{CMAKE_CXX_COMPILER_LAUNCHER} "")
+    set(CMAKE_C_COMPILER_LAUNCHER "" CACHE STRING "" FORCE)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "" CACHE STRING "" FORCE)
+endif()
+
 project(amrex_miniSMC LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
-option(MINISMC_USE_SUPERBUILD "Build AMReX from an in-tree source checkout" OFF)
-set(AMREX_SOURCE_DIR "" CACHE PATH "Path to the AMReX source tree (used when super-building)")
 
 if(MINISMC_USE_SUPERBUILD OR (NOT AMReX_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../amrex/CMakeLists.txt"))
     if(NOT AMREX_SOURCE_DIR)

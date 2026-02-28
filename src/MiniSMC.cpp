@@ -121,8 +121,9 @@ void MiniSMC::build_mesh()
     dom_hi -= IntVect(AMREX_D_DECL(1, 1, 1));
 
     Box domain(dom_lo, dom_hi);
-    Vector<int> is_per(AMREX_SPACEDIM, 1);
-    m_geom.define(domain, m_prob.prob_domain, CoordSys::cartesian, is_per.data());
+    amrex::Array<int, AMREX_SPACEDIM> is_per;
+    is_per.fill(1);
+    m_geom.define(domain, &m_prob.prob_domain, CoordSys::cartesian, is_per.data());
 
     m_dx = m_geom.CellSizeArray();
 

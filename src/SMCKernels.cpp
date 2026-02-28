@@ -4,7 +4,7 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_Math.H>
 #include <AMReX_MultiFabUtil.H>
-#include <AMReX_ParallelFor.H>
+#include <AMReX_Gpu.H>
 #include <AMReX_Reduce.H>
 
 namespace minismc::kernels {
@@ -143,7 +143,7 @@ void InitData(const Geometry& geom,
             Real z = 0.0_rt;
 #endif
 
-            Real r = Math::sqrt(x * x + y * y + z * z);
+            Real r = std::sqrt(x * x + y * y + z * z);
 
             Real Pt = patm;
             Real Tt = 300.0_rt;
@@ -154,7 +154,7 @@ void InitData(const Geometry& geom,
             Xt[0] = 0.10_rt;
             Xt[1] = 0.25_rt;
 
-            Real expfac = Math::exp(-Math::pow(r / rfire, 2.0_rt));
+            Real expfac = std::exp(-std::pow(r / rfire, 2.0_rt));
             Pt += 0.1_rt * patm * expfac;
             Tt += 1100.0_rt * expfac;
             Xt[0] += 0.025_rt * expfac;
@@ -169,8 +169,8 @@ void InitData(const Geometry& geom,
             Real et;
             CKUBMS(Tt, Yt.data(), et);
 
-            Real uvel = Math::sin(kx * x) * Math::cos(ky * y) * Math::cos(kz * z) * 300.0_rt;
-            Real vvel = -Math::cos(kx * x) * Math::sin(ky * y) * Math::cos(kz * z) * 300.0_rt;
+            Real uvel = std::sin(kx * x) * std::cos(ky * y) * std::cos(kz * z) * 300.0_rt;
+            Real vvel = -std::cos(kx * x) * std::sin(ky * y) * std::cos(kz * z) * 300.0_rt;
             Real wvel = 0.0_rt;
 
             Real kin = 0.5_rt * (uvel * uvel + vvel * vvel + wvel * wvel);
@@ -322,7 +322,7 @@ void ComputeTransport(const MultiFab& prim,
                 Y[n] = qp(i, j, k, QY + n);
             }
             Real T = qp(i, j, k, QTEMP);
-            Real mu_val = 1.458e-5_rt * Math::sqrt(T) * T / (T + 110.4_rt);
+            Real mu_val = 1.458e-5_rt * std::sqrt(T) * T / (T + 110.4_rt);
             mup(i, j, k) = mu_val;
             xip(i, j, k) = 0.0_rt;
 
@@ -687,8 +687,9 @@ void ComputeCourant(const Geometry& geom,
 
         ReduceOps<ReduceOpMax> reduce_op;
         ReduceData<Real> reduce_data(reduce_op);
+        using ReduceTuple = typename decltype(reduce_data)::Type;
         reduce_op.eval(bx, reduce_data,
-            [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept -> Real {
+            [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept -> ReduceTuple {
                 GpuArray<Real, NSpecies> X;
                 for (int n = 0; n < NSpecies; ++n) {
                     X[n] = qp(i, j, k, QX + n);
@@ -697,15 +698,16 @@ void ComputeCourant(const Geometry& geom,
                 CKCVBL(qp(i, j, k, QTEMP), X.data(), Cv);
                 Real Cp = Cv + kRu;
                 Real gamma = Cp / Cv;
-                Real c = Math::sqrt(gamma * qp(i, j, k, QPRES) / qp(i, j, k, QRHO));
+                Real c = std::sqrt(gamma * qp(i, j, k, QPRES) / qp(i, j, k, QRHO));
                 Real cour = (c + Math::abs(qp(i, j, k, QU))) * dxinv[0];
                 cour = amrex::max(cour, (c + Math::abs(qp(i, j, k, QV))) * dxinv[1]);
 #if (AMREX_SPACEDIM == 3)
                 cour = amrex::max(cour, (c + Math::abs(qp(i, j, k, QW))) * dxinv[2]);
 #endif
-                return cour;
+                return {cour};
             });
-        Real tile_max = reduce_data.value();
+        ReduceTuple tile_tuple = reduce_data.value(reduce_op);
+        Real tile_max = amrex::get<0>(tile_tuple);
         local_max = amrex::max(local_max, tile_max);
     }
 

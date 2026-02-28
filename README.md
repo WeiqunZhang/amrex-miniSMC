@@ -21,6 +21,7 @@ Two workflows are supported: using an existing AMReX installation or running a s
 cd amrex-miniSMC
 cmake -S . -B build \
       -DMINISMC_USE_SUPERBUILD=ON \
+      -DMINISMC_DISABLE_CCACHE=ON \
       -DAMREX_SOURCE_DIR=../amrex \
       -DAMReX_GPU_BACKEND=CUDA -DAMReX_MPI=ON   # pick backend/options
 cmake --build build -j
@@ -33,6 +34,7 @@ You can pass any regular `AMReX_*` cache variable at configure time (e.g., `-DAM
 ```bash
 cd amrex-miniSMC
 cmake -S . -B build -DAMReX_DIR=/path/to/amrex/install \
+      -DMINISMC_DISABLE_CCACHE=ON \
       -DAMReX_GPU_BACKEND=CUDA
 cmake --build build -j
 ```
@@ -43,7 +45,7 @@ cmake --build build -j
 mpirun -n 4 build/miniSMC inputs/inputs_smc
 ```
 
-AMReX handles OpenMP threading automatically when configured with `-DAMReX_OMP=ON`. GPU backends are enabled through `AMReX_GPU_BACKEND` (values: `NONE`, `CUDA`, `HIP`, `SYCL`).
+AMReX handles OpenMP threading automatically when configured with `-DAMReX_OMP=ON`. GPU backends are enabled through `AMReX_GPU_BACKEND` (values: `NONE`, `CUDA`, `HIP`, `SYCL`). `MINISMC_DISABLE_CCACHE` is ON by default to avoid sandbox permission problems; flip it OFF if you want to re-enable your ccache setup.
 
 ## Runtime Parameters
 
