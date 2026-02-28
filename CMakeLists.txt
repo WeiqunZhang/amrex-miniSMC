@@ -8,11 +8,36 @@ if(MINISMC_DISABLE_CCACHE)
     set(ENV{CCACHE_DISABLE} 1)
     set(ENV{CMAKE_C_COMPILER_LAUNCHER} "")
     set(ENV{CMAKE_CXX_COMPILER_LAUNCHER} "")
+    set(ENV{CMAKE_CUDA_COMPILER_LAUNCHER} "")
+    set(ENV{CMAKE_HIP_COMPILER_LAUNCHER} "")
     set(CMAKE_C_COMPILER_LAUNCHER "" CACHE STRING "" FORCE)
     set(CMAKE_CXX_COMPILER_LAUNCHER "" CACHE STRING "" FORCE)
+    set(CMAKE_CUDA_COMPILER_LAUNCHER "" CACHE STRING "" FORCE)
+    set(CMAKE_HIP_COMPILER_LAUNCHER "" CACHE STRING "" FORCE)
 endif()
 
 project(amrex_miniSMC LANGUAGES CXX)
+
+set(_gpu_backend "")
+if(DEFINED AMReX_GPU_BACKEND)
+    string(TOUPPER "${AMReX_GPU_BACKEND}" _gpu_backend)
+endif()
+
+if(_gpu_backend STREQUAL "CUDA")
+    enable_language(CUDA)
+    set(CMAKE_CUDA_STANDARD 17)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+    set(CMAKE_CUDA_EXTENSIONS OFF)
+elseif(_gpu_backend STREQUAL "HIP")
+    enable_language(HIP)
+    set(CMAKE_HIP_STANDARD 17)
+    set(CMAKE_HIP_STANDARD_REQUIRED ON)
+    set(CMAKE_HIP_EXTENSIONS OFF)
+elseif(_gpu_backend STREQUAL "SYCL")
+    # SYCL builds still use the host C++ compiler but rely on Clang extensions,
+    # so there is no dedicated language to enable here.  The branch exists so
+    # future SYCL-specific setup can be added without touching the rest.
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
