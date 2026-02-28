@@ -82,6 +82,7 @@ enum VelDerComp {
     DWDY,
     DWDZ
 };
+constexpr int kNumVelDeriv = 9;
 
 AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 void apply_offset(int dir, int offset, int& i, int& j, int& k) noexcept
@@ -186,6 +187,7 @@ constexpr int QH = QX + NSpecies;
 AMREX_GPU_MANAGED int kMomentumIndex[AMREX_SPACEDIM] = {AMREX_D_DECL(UMX, UMY, UMZ)};
 AMREX_GPU_MANAGED int kVelocityIndex[AMREX_SPACEDIM] = {AMREX_D_DECL(QU, QV, QW)};
 constexpr int kInertSpecies = N2_ID;
+constexpr Real TwoThirds = 2.0_rt / 3.0_rt;
 constexpr Real FourThirds = 4.0_rt / 3.0_rt;
 
 template <typename F>
@@ -1144,135 +1146,150 @@ void add_diffusive_part1(const Geometry& geom,
                          MultiFab& rhs)
 {
     const auto dxinv = geom.InvCellSizeArray();
+    amrex::ignore_unused(lam);
+    amrex::ignore_unused(Ddiag);
 
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
 #endif
     for (MFIter mfi(rhs, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
+        const Box gbox = amrex::grow(bx, StencilNG);
         auto rp = rhs.array(mfi);
         auto qp = prim.const_array(mfi);
         auto mup = mu.const_array(mfi);
         auto xip = xi.const_array(mfi);
-        auto lamp = lam.const_array(mfi);
-        auto dp = Ddiag.const_array(mfi);
+        FArrayBox gradfab(gbox, kNumVelDeriv, The_Async_Arena());
+        auto grad = gradfab.array();
+
+        ParallelFor(gbox, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+            grad(i, j, k, DUDX) = central_diff(qp, QU, i, j, k, 0, dxinv);
+            grad(i, j, k, DVDX) = central_diff(qp, QV, i, j, k, 0, dxinv);
+            grad(i, j, k, DWDX) = central_diff(qp, QW, i, j, k, 0, dxinv);
+            grad(i, j, k, DUDY) = central_diff(qp, QU, i, j, k, 1, dxinv);
+            grad(i, j, k, DVDY) = central_diff(qp, QV, i, j, k, 1, dxinv);
+            grad(i, j, k, DWDY) = central_diff(qp, QW, i, j, k, 1, dxinv);
+#if (AMREX_SPACEDIM == 3)
+            grad(i, j, k, DUDZ) = central_diff(qp, QU, i, j, k, 2, dxinv);
+            grad(i, j, k, DVDZ) = central_diff(qp, QV, i, j, k, 2, dxinv);
+            grad(i, j, k, DWDZ) = central_diff(qp, QW, i, j, k, 2, dxinv);
+#else
+            grad(i, j, k, DUDZ) = 0.0_rt;
+            grad(i, j, k, DVDZ) = 0.0_rt;
+            grad(i, j, k, DWDZ) = 0.0_rt;
+#endif
+        });
+
+        auto vsm_eval = [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+            return xip(i, j, k, 0) - TwoThirds * mup(i, j, k, 0);
+        };
+        auto mu_eval = [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+            return mup(i, j, k, 0);
+        };
 
         ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-            Real tau_xx_hi, tau_xy_hi, tau_xz_hi;
-            Real tau_xx_lo, tau_xy_lo, tau_xz_lo;
-            compute_tau_face_x(i, j, k, qp, mup, xip, dxinv,
-                               tau_xx_hi, tau_xy_hi, tau_xz_hi);
-            compute_tau_face_x(i - 1, j, k, qp, mup, xip, dxinv,
-                               tau_xx_lo, tau_xy_lo, tau_xz_lo);
+            Real mx_x = central_diff_fn(i, j, k, 0, dxinv,
+                [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    Real vy = grad(ii, jj, kk, DVDY);
+                    Real wz = grad(ii, jj, kk, DWDZ);
+                    return vsm_eval(ii, jj, kk) * (vy + wz);
+                });
 
-            Real tau_yx_hi, tau_yy_hi, tau_yz_hi;
-            Real tau_yx_lo, tau_yy_lo, tau_yz_lo;
-            compute_tau_face_y(i, j, k, qp, mup, xip, dxinv,
-                               tau_yx_hi, tau_yy_hi, tau_yz_hi);
-            compute_tau_face_y(i, j - 1, k, qp, mup, xip, dxinv,
-                               tau_yx_lo, tau_yy_lo, tau_yz_lo);
+            Real mx_y = central_diff_fn(i, j, k, 1, dxinv,
+                [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    return mu_eval(ii, jj, kk) * grad(ii, jj, kk, DVDX);
+                });
+
+            Real mx_z = 0.0_rt;
+#if (AMREX_SPACEDIM == 3)
+            mx_z = central_diff_fn(i, j, k, 2, dxinv,
+                [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    return mu_eval(ii, jj, kk) * grad(ii, jj, kk, DWDX);
+                });
+#endif
+            rp(i, j, k, UMX) += mx_x + mx_y + mx_z;
+
+            Real my_x = central_diff_fn(i, j, k, 0, dxinv,
+                [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    return mu_eval(ii, jj, kk) * grad(ii, jj, kk, DUDY);
+                });
+
+            Real my_y = central_diff_fn(i, j, k, 1, dxinv,
+                [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    Real ux = grad(ii, jj, kk, DUDX);
+                    Real wz = grad(ii, jj, kk, DWDZ);
+                    return vsm_eval(ii, jj, kk) * (ux + wz);
+                });
+
+            Real my_z = 0.0_rt;
+#if (AMREX_SPACEDIM == 3)
+            my_z = central_diff_fn(i, j, k, 2, dxinv,
+                [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    return mu_eval(ii, jj, kk) * grad(ii, jj, kk, DWDY);
+                });
+#endif
+            rp(i, j, k, UMY) += my_x + my_y + my_z;
 
 #if (AMREX_SPACEDIM == 3)
-            Real tau_zx_hi, tau_zy_hi, tau_zz_hi;
-            Real tau_zx_lo, tau_zy_lo, tau_zz_lo;
-            compute_tau_face_z(i, j, k, qp, mup, xip, dxinv,
-                               tau_zx_hi, tau_zy_hi, tau_zz_hi);
-            compute_tau_face_z(i, j, k - 1, qp, mup, xip, dxinv,
-                               tau_zx_lo, tau_zy_lo, tau_zz_lo);
+            Real mz_x = central_diff_fn(i, j, k, 0, dxinv,
+                [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    return mu_eval(ii, jj, kk) * grad(ii, jj, kk, DUDZ);
+                });
+
+            Real mz_y = central_diff_fn(i, j, k, 1, dxinv,
+                [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    return mu_eval(ii, jj, kk) * grad(ii, jj, kk, DVDZ);
+                });
+
+            Real mz_z = central_diff_fn(i, j, k, 2, dxinv,
+                [=] AMREX_GPU_DEVICE(int ii, int jj, int kk) noexcept {
+                    Real ux = grad(ii, jj, kk, DUDX);
+                    Real vy = grad(ii, jj, kk, DVDY);
+                    return vsm_eval(ii, jj, kk) * (ux + vy);
+                });
+
+            rp(i, j, k, UMZ) += mz_x + mz_y + mz_z;
+#endif
+
+            Real mu_c = mu_eval(i, j, k);
+            Real vsm_c = vsm_eval(i, j, k);
+            Real dudx = grad(i, j, k, DUDX);
+            Real dvdy = grad(i, j, k, DVDY);
+            Real divu = dudx + dvdy;
+#if (AMREX_SPACEDIM == 3)
+            Real dwdz = grad(i, j, k, DWDZ);
+            divu += dwdz;
 #else
-            Real tau_zx_hi = 0.0_rt, tau_zx_lo = 0.0_rt;
-            Real tau_zy_hi = 0.0_rt, tau_zy_lo = 0.0_rt;
-            Real tau_zz_hi = 0.0_rt, tau_zz_lo = 0.0_rt;
+            Real dwdz = 0.0_rt;
+#endif
+            Real divu_term = vsm_c * divu;
+            Real tauxx = 2.0_rt * mu_c * dudx + divu_term;
+            Real tauyy = 2.0_rt * mu_c * dvdy + divu_term;
+            Real tauzz = divu_term;
+#if (AMREX_SPACEDIM == 3)
+            tauzz = 2.0_rt * mu_c * dwdz + divu_term;
 #endif
 
-            Real visc_x = (tau_xx_hi - tau_xx_lo) * dxinv[0]
-                        + (tau_yx_hi - tau_yx_lo) * dxinv[1];
+            Real shear1 = grad(i, j, k, DUDY) + grad(i, j, k, DVDX);
+            Real shear2 = grad(i, j, k, DWDX);
 #if (AMREX_SPACEDIM == 3)
-            visc_x += (tau_zx_hi - tau_zx_lo) * dxinv[2];
-#endif
-            rp(i, j, k, UMX) += visc_x;
-
-            Real visc_y = (tau_xy_hi - tau_xy_lo) * dxinv[0]
-                        + (tau_yy_hi - tau_yy_lo) * dxinv[1];
-#if (AMREX_SPACEDIM == 3)
-            visc_y += (tau_zy_hi - tau_zy_lo) * dxinv[2];
-#endif
-            rp(i, j, k, UMY) += visc_y;
-
-#if (AMREX_SPACEDIM == 3)
-            Real visc_z = (tau_xz_hi - tau_xz_lo) * dxinv[0]
-                        + (tau_yz_hi - tau_yz_lo) * dxinv[1]
-                        + (tau_zz_hi - tau_zz_lo) * dxinv[2];
-            rp(i, j, k, UMZ) += visc_z;
-#endif
-
-            Real heat_x_hi = compute_heat_flux_face(0, i, j, k, qp, lamp, dxinv);
-            Real heat_x_lo = compute_heat_flux_face(0, i - 1, j, k, qp, lamp, dxinv);
-            Real heat_y_hi = compute_heat_flux_face(1, i, j, k, qp, lamp, dxinv);
-            Real heat_y_lo = compute_heat_flux_face(1, i, j - 1, k, qp, lamp, dxinv);
-#if (AMREX_SPACEDIM == 3)
-            Real heat_z_hi = compute_heat_flux_face(2, i, j, k, qp, lamp, dxinv);
-            Real heat_z_lo = compute_heat_flux_face(2, i, j, k - 1, qp, lamp, dxinv);
+            shear2 += grad(i, j, k, DUDZ);
+            Real shear3 = grad(i, j, k, DVDZ) + grad(i, j, k, DWDY);
 #else
-            Real heat_z_hi = 0.0_rt;
-            Real heat_z_lo = 0.0_rt;
+            Real shear3 = 0.0_rt;
 #endif
 
-            Real energy_flux_x_hi = heat_x_hi;
-            Real energy_flux_x_lo = heat_x_lo;
-            Real energy_flux_y_hi = heat_y_hi;
-            Real energy_flux_y_lo = heat_y_lo;
-            Real energy_flux_z_hi = heat_z_hi;
-            Real energy_flux_z_lo = heat_z_lo;
-
-            for (int n = 0; n < NSpecies; ++n) {
-                Real flux_x_hi = compute_species_flux_face(0, i, j, k, n, qp, dp, dxinv);
-                Real flux_x_lo = compute_species_flux_face(0, i - 1, j, k, n, qp, dp, dxinv);
-                Real flux_y_hi = compute_species_flux_face(1, i, j, k, n, qp, dp, dxinv);
-                Real flux_y_lo = compute_species_flux_face(1, i, j - 1, k, n, qp, dp, dxinv);
+            Real visc_ene = tauxx * dudx + tauyy * dvdy;
 #if (AMREX_SPACEDIM == 3)
-                Real flux_z_hi = compute_species_flux_face(2, i, j, k, n, qp, dp, dxinv);
-                Real flux_z_lo = compute_species_flux_face(2, i, j, k - 1, n, qp, dp, dxinv);
-#else
-                Real flux_z_hi = 0.0_rt;
-                Real flux_z_lo = 0.0_rt;
+            visc_ene += tauzz * dwdz;
 #endif
-
-                Real div_flux = (flux_x_hi - flux_x_lo) * dxinv[0]
-                              + (flux_y_hi - flux_y_lo) * dxinv[1];
+            visc_ene += mu_c * (shear1 * shear1 + shear2 * shear2
 #if (AMREX_SPACEDIM == 3)
-                div_flux += (flux_z_hi - flux_z_lo) * dxinv[2];
+                                + shear3 * shear3
 #endif
-                rp(i, j, k, URY1 + n) += div_flux;
+                                );
 
-                Real h_x_hi = face_interp(qp, QH + n, 0, i, j, k);
-                Real h_x_lo = face_interp(qp, QH + n, 0, i - 1, j, k);
-                Real h_y_hi = face_interp(qp, QH + n, 1, i, j, k);
-                Real h_y_lo = face_interp(qp, QH + n, 1, i, j - 1, k);
-#if (AMREX_SPACEDIM == 3)
-                Real h_z_hi = face_interp(qp, QH + n, 2, i, j, k);
-                Real h_z_lo = face_interp(qp, QH + n, 2, i, j, k - 1);
-#else
-                Real h_z_hi = 0.0_rt;
-                Real h_z_lo = 0.0_rt;
-#endif
-
-                energy_flux_x_hi += h_x_hi * flux_x_hi;
-                energy_flux_x_lo += h_x_lo * flux_x_lo;
-                energy_flux_y_hi += h_y_hi * flux_y_hi;
-                energy_flux_y_lo += h_y_lo * flux_y_lo;
-#if (AMREX_SPACEDIM == 3)
-                energy_flux_z_hi += h_z_hi * flux_z_hi;
-                energy_flux_z_lo += h_z_lo * flux_z_lo;
-#endif
-            }
-
-            Real energy_div = (energy_flux_x_hi - energy_flux_x_lo) * dxinv[0]
-                            + (energy_flux_y_hi - energy_flux_y_lo) * dxinv[1];
-#if (AMREX_SPACEDIM == 3)
-            energy_div += (energy_flux_z_hi - energy_flux_z_lo) * dxinv[2];
-#endif
-            rp(i, j, k, UEDEN) += energy_div;
+            rp(i, j, k, UEDEN) += visc_ene;
         });
     }
 }
