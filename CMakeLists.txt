@@ -59,11 +59,21 @@ else()
     find_package(AMReX CONFIG REQUIRED)
 endif()
 
-add_executable(miniSMC
+set(MINISMC_SOURCES
     src/main.cpp
     src/MiniSMC.cpp
     src/SMCKernels.cpp
     src/Mechanism.cpp)
+
+add_executable(miniSMC ${MINISMC_SOURCES})
+
+if(_gpu_backend STREQUAL "CUDA")
+    set_source_files_properties(${MINISMC_SOURCES} PROPERTIES LANGUAGE CUDA)
+    set_target_properties(miniSMC PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+elseif(_gpu_backend STREQUAL "HIP")
+    set_source_files_properties(${MINISMC_SOURCES} PROPERTIES LANGUAGE HIP)
+    set_target_properties(miniSMC PROPERTIES HIP_SEPARABLE_COMPILATION ON)
+endif()
 
 target_include_directories(miniSMC PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
