@@ -45,36 +45,6 @@ Real d8_coeff(int idx) noexcept
     return coeffs[idx];
 }
 
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-Real face_interp_coeff(int idx) noexcept
-{
-    constexpr Real coeffs[8] = {
-        -5.0_rt / 2048.0_rt,
-        49.0_rt / 2048.0_rt,
-        -245.0_rt / 2048.0_rt,
-        1225.0_rt / 2048.0_rt,
-        1225.0_rt / 2048.0_rt,
-        -245.0_rt / 2048.0_rt,
-        49.0_rt / 2048.0_rt,
-        -5.0_rt / 2048.0_rt};
-    return coeffs[idx];
-}
-
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-Real face_deriv_coeff(int idx) noexcept
-{
-    constexpr Real coeffs[8] = {
-        6.97544642857694e-04_rt,
-        -9.57031250000056e-03_rt,
-        7.975260416666667e-02_rt,
-        -1.1962890625_rt,
-        1.1962890625_rt,
-        -7.975260416666667e-02_rt,
-        9.5703125e-03_rt,
-        -6.975446428571429e-04_rt};
-    return coeffs[idx];
-}
-
 enum VelDerComp {
     DUDX = 0,
     DUDY,
@@ -294,45 +264,6 @@ Real central_diff_fn(int i, int j, int k,
         }
     }
     return sum * dxinv[dir];
-}
-
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-Real laplacian(const Array4<const Real>& arr,
-               int comp,
-               int i, int j, int k,
-               const GpuArray<Real, AMREX_SPACEDIM>& dxinv)
-{
-    Real result = 0.0_rt;
-    for (int dir = 0; dir < AMREX_SPACEDIM; ++dir) {
-        Real forward = 0.0_rt;
-        Real backward = 0.0_rt;
-        Real center = arr(i, j, k, comp);
-        if (dir == 0) {
-            forward = arr(i + 1, j, k, comp);
-            backward = arr(i - 1, j, k, comp);
-        } else if (dir == 1) {
-            forward = arr(i, j + 1, k, comp);
-            backward = arr(i, j - 1, k, comp);
-        } else {
-            forward = arr(i, j, k + 1, comp);
-            backward = arr(i, j, k - 1, comp);
-        }
-        result += (forward - 2.0_rt * center + backward) * dxinv[dir] * dxinv[dir];
-    }
-    return result;
-}
-
-AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
-Real div_velocity(const Array4<const Real>& prim,
-                  int i, int j, int k,
-                  const GpuArray<Real, AMREX_SPACEDIM>& dxinv)
-{
-    Real divu = central_diff(prim, QU, i, j, k, 0, dxinv)
-              + central_diff(prim, QV, i, j, k, 1, dxinv);
-#if (AMREX_SPACEDIM == 3)
-    divu += central_diff(prim, QW, i, j, k, 2, dxinv);
-#endif
-    return divu;
 }
 
 } // namespace
