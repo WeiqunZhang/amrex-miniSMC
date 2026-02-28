@@ -8,6 +8,9 @@
 #include <AMReX_Print.H>
 #include <AMReX_REAL.H>
 #include <AMReX_RealBox.H>
+#include <AMReX_Vector.H>
+
+#include <string>
 
 #include "Mechanism.H"
 
@@ -35,6 +38,11 @@ struct ProbParm {
     Real max_dt = 1.0e33;
     Real fixed_dt = -1.0;
     Real rfire = 0.01;
+    int plot_int = -1;
+    int plot_init = 0;
+    int plot_final = 0;
+    Real plot_deltat = -1.0;
+    std::string plot_file = "plt";
 };
 
 struct TimingStats {
@@ -66,6 +74,9 @@ private:
     void add_diffusive_terms();
     void compute_courno(Real& courno);
     void init_from_scratch();
+    void maybe_write_plotfile(int istep);
+    void write_plotfile(int istep);
+    amrex::Vector<std::string> build_plot_var_names() const;
 
     ProbParm m_prob;
     TimingStats m_timers;
@@ -88,6 +99,10 @@ private:
     amrex::MultiFab m_Ddiag;
 
     amrex::GpuArray<Real, AMREX_SPACEDIM> m_dx{{AMREX_D_DECL(0.0, 0.0, 0.0)}};
+    amrex::Vector<std::string> m_plot_var_names;
+    int m_plotfile_index = 0;
+    int m_last_plotfile_step = -1;
+    Real m_next_plot_time = -1.0;
 };
 
 } // namespace minismc

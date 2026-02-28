@@ -6,7 +6,9 @@
 #include <AMReX_LO_BCTYPES.H>
 #include <AMReX_MultiFabUtil.H>
 #include <AMReX_ParallelDescriptor.H>
+#include <AMReX_PlotFileUtil.H>
 #include <AMReX_Print.H>
+#include <AMReX_Utility.H>
 #include <AMReX_Vector.H>
 
 #include <algorithm>
@@ -50,6 +52,10 @@ MiniSMC::MiniSMC()
 {
     read_parameters();
     build_mesh();
+    m_plot_var_names = build_plot_var_names();
+    if (m_prob.plot_deltat > 0.0_rt) {
+        m_next_plot_time = m_prob.plot_deltat;
+    }
 }
 
 void MiniSMC::read_parameters()
@@ -116,6 +122,15 @@ void MiniSMC::read_parameters()
     query_value("fixed_dt", m_prob.fixed_dt);
     query_value("verbose", m_prob.verbose);
     query_value("rfire", m_prob.rfire);
+    query_value("plot_int", m_prob.plot_int);
+    query_value("plot_deltat", m_prob.plot_deltat);
+    query_value("plot_init", m_prob.plot_init);
+    query_value("plot_final", m_prob.plot_final);
+    query_value("plot_file", m_prob.plot_file);
+
+    if (m_prob.plot_file.empty()) {
+        m_prob.plot_file = "plt";
+    }
 
     Vector<Real> plo(AMREX_SPACEDIM, 0.0_rt);
     Vector<Real> phi(AMREX_SPACEDIM, 1.0_rt);
@@ -200,6 +215,10 @@ void MiniSMC::Evolve()
 
     InitData();
 
+    if (m_prob.plot_init > 0) {
+        write_plotfile(0);
+    }
+
     const int init_step = 1;
     const Real stoptime = m_prob.stop_time;
 
@@ -207,6 +226,8 @@ void MiniSMC::Evolve()
 
     Real wt_start = amrex::second();
 
+    bool took_step = false;
+    int last_istep = init_step - 1;
     if ((m_prob.max_step >= init_step) && (stoptime < 0.0_rt || m_time < stoptime)) {
         for (int istep = init_step; istep <= m_prob.max_step; ++istep) {
             if (ParallelDescriptor::IOProcessor()) {
@@ -214,15 +235,22 @@ void MiniSMC::Evolve()
             }
 
             advance_step(istep);
+            took_step = true;
+            last_istep = istep;
 
             if (ParallelDescriptor::IOProcessor()) {
                 amrex::Print() << "End step " << istep << ", time = " << m_time << std::endl;
             }
 
+            maybe_write_plotfile(istep);
+
             if (stoptime >= 0.0_rt && m_time >= stoptime) {
                 break;
             }
         }
+    }
+    if (m_prob.plot_final > 0 && took_step && m_last_plotfile_step != last_istep) {
+        write_plotfile(last_istep);
     }
 
     Real wt_total = amrex::second() - wt_start;
@@ -340,6 +368,64 @@ void MiniSMC::set_dt(Real courno, int istep)
         }
     }
     m_dt = new_dt;
+}
+
+void MiniSMC::maybe_write_plotfile(int istep)
+{
+    if (m_prob.plot_int <= 0 && m_prob.plot_deltat <= 0.0_rt) {
+        return;
+    }
+
+    if (m_prob.plot_int > 0 && istep > 0 && (istep % m_prob.plot_int) == 0) {
+        write_plotfile(istep);
+    }
+
+    if (m_prob.plot_deltat > 0.0_rt && m_next_plot_time > 0.0_rt) {
+        constexpr Real eps = 1.0e-12_rt;
+        while (m_time + eps >= m_next_plot_time) {
+            write_plotfile(istep);
+            m_next_plot_time += m_prob.plot_deltat;
+        }
+    }
+}
+
+void MiniSMC::write_plotfile(int istep)
+{
+    if (m_plot_var_names.empty()) {
+        m_plot_var_names = build_plot_var_names();
+    }
+
+    const std::string plt = amrex::Concatenate(m_prob.plot_file, m_plotfile_index, 5);
+    amrex::WriteSingleLevelPlotfile(plt, m_state, m_plot_var_names, m_geom, m_time, istep);
+
+    if (ParallelDescriptor::IOProcessor() && m_prob.verbose > 0) {
+        amrex::Print() << "Wrote plotfile " << plt << " at time " << m_time << std::endl;
+    }
+
+    ++m_plotfile_index;
+    m_last_plotfile_step = istep;
+}
+
+amrex::Vector<std::string> MiniSMC::build_plot_var_names() const
+{
+    amrex::Vector<std::string> names(NCons);
+    names[URHO] = "rho";
+    names[UMX] = "momx";
+    names[UMY] = "momy";
+    names[UMZ] = "momz";
+    names[UEDEN] = "rhoE";
+
+    amrex::Vector<std::string> species;
+    CKSYMS_STR(species);
+
+    for (int n = 0; n < NSpecies; ++n) {
+        std::string label = "rhoY_" + std::to_string(n);
+        if (species.size() == NSpecies) {
+            label = "rhoY_" + species[n];
+        }
+        names[URY1 + n] = label;
+    }
+    return names;
 }
 
 } // namespace minismc

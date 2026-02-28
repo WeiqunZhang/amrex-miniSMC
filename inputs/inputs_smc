@@ -20,3 +20,9 @@ prob.prob_hi = 5.0e-2 5.0e-2 5.0e-2
 
 # Initial condition knob
 prob.rfire = 1.0e-2
+
+# Plotfiles
+smc.plot_file = plt
+smc.plot_int = 5
+smc.plot_init = 1
+smc.plot_final = 1

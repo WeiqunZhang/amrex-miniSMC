@@ -51,12 +51,20 @@ AMReX handles OpenMP threading automatically when configured with `-DAMReX_OMP=O
 
 All parameters from the original `inputs_SMC` namelist are supported via plain AMReX `ParmParse` entries (e.g., `n_cellx`, `cflfac`, `stop_time`, etc.). See `inputs/inputs_smc` for defaults.
 
+### Plotfiles
+
+Set `smc.plot_int` (write every N steps) or `smc.plot_deltat` (write every Δt seconds) to enable AMReX plotfile output. Optional helpers:
+
+- `smc.plot_file` – base directory name (default `plt`).
+- `smc.plot_init` – set to 1 to dump the initialized state.
+- `smc.plot_final` – set to 1 to force a write after the final step if one was not triggered by the cadence.
+
 ## Notes and Limitations
 
 - The LiDryer mechanism is imported from the PelePhysics project (BSD-3 license). Cite PelePhysics if you redistribute the mechanism.
 - For numerical portability the spatial operators currently use centered second-order finite differences rather than the original eight-order stencils. This makes the port easier to maintain across CPU and GPU backends, but you may wish to raise the order later.
 - Viscous heating and species diffusion follow simplified constant-coefficient models. Transport coefficients are still evaluated from local thermodynamic states, so you can refine them if higher fidelity is required.
-- Plot/output routines have not been added yet; AMReX `WriteMultiLevelPlotfile` can be wired in once an output cadence is defined.
+- Plot/output routines currently consist of single-level AMReX plotfiles; add checkpoints or derived diagnostics later if needed.
 
 ## Next Steps
 
