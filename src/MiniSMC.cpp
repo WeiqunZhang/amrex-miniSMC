@@ -52,6 +52,7 @@ MiniSMC::MiniSMC()
 {
     read_parameters();
     build_mesh();
+    m_timers = {};
     m_plot_var_names = build_plot_var_names();
     if (m_prob.plotfile_enable > 0 && m_prob.plot_deltat > 0.0_rt) {
         m_next_plot_time = m_prob.plot_deltat;
@@ -235,6 +236,7 @@ void MiniSMC::Evolve()
     }
 
     InitData();
+    m_timers = {};
 
     if (m_prob.plotfile_enable > 0 && m_prob.plot_init > 0) {
         write_plotfile(0);
@@ -279,6 +281,11 @@ void MiniSMC::Evolve()
     ParallelDescriptor::ReduceRealMax(wt_total, ParallelDescriptor::IOProcessorNumber());
     if (ParallelDescriptor::IOProcessor()) {
         amrex::Print() << "miniSMC advance time = " << wt_total << std::endl;
+        amrex::Print() << "  fill boundary time = " << m_timers.fillboundary << std::endl;
+        amrex::Print() << "  ctoprim       time = " << m_timers.ctoprim << std::endl;
+        amrex::Print() << "  chemterm      time = " << m_timers.chemistry << std::endl;
+        amrex::Print() << "  transprop     time = " << m_timers.transport << std::endl;
+        amrex::Print() << "  hyper & diff  time = " << m_timers.hypdiff << std::endl;
     }
 }
 
@@ -315,14 +322,28 @@ void MiniSMC::advance_step(int istep)
 
 void MiniSMC::compute_rhs(bool need_courno, Real& courno)
 {
+    Real t0 = amrex::second();
     m_state.FillBoundary(m_geom.periodicity());
+    m_timers.fillboundary += amrex::second() - t0;
+
     m_rhs.setVal(0.0);
 
+    t0 = amrex::second();
     compute_primitives();
+    m_timers.ctoprim += amrex::second() - t0;
+
+    t0 = amrex::second();
     compute_chemistry();
+    m_timers.chemistry += amrex::second() - t0;
+
+    t0 = amrex::second();
     compute_transport();
+    m_timers.transport += amrex::second() - t0;
+
+    t0 = amrex::second();
     add_hyperbolic_terms();
     add_diffusive_terms();
+    m_timers.hypdiff += amrex::second() - t0;
 
     if (need_courno) {
         compute_courno(courno);
