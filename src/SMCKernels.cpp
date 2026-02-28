@@ -4,6 +4,7 @@
 #include <AMReX_Geometry.H>
 #include <AMReX_Math.H>
 #include <AMReX_MultiFabUtil.H>
+#include <AMReX_OpenMP.H>
 #include <AMReX_Gpu.H>
 #include <AMReX_Reduce.H>
 
@@ -125,6 +126,9 @@ void InitData(const Geometry& geom,
     Real Ru, Ruc, Patm;
     CKRP(Ru, Ruc, Patm);
 
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
     for (MFIter mfi(state, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
         auto arr = state.array(mfi);
@@ -194,6 +198,9 @@ void ComputePrimitives(const Geometry& geom,
 {
     const auto dxinv = geom.InvCellSizeArray();
 
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
     for (MFIter mfi(prim, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.growntilebox(StencilNG);
         auto q = prim.array(mfi);
@@ -252,6 +259,9 @@ void ResetDensity(MultiFab& state)
 {
     const IntVect ng = state.nGrowVect();
 
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
     for (MFIter mfi(state, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.growntilebox(ng);
         auto arr = state.array(mfi);
@@ -281,6 +291,9 @@ void AddChemistry(MultiFab& rhs,
     GpuArray<Real, NSpecies> mw;
     CKWT(mw.data());
 
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
     for (MFIter mfi(rhs, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
         auto rp = rhs.array(mfi);
@@ -308,6 +321,9 @@ void ComputeTransport(const MultiFab& prim,
                       MultiFab& lam,
                       MultiFab& Ddiag)
 {
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
     for (MFIter mfi(prim, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.growntilebox(StencilNG);
         auto qp = prim.const_array(mfi);
@@ -346,6 +362,9 @@ void AddHyperbolic(const Geometry& geom,
 {
     const auto dxinv = geom.InvCellSizeArray();
 
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
     for (MFIter mfi(rhs, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
         auto ru = rhs.array(mfi);
@@ -490,6 +509,9 @@ void AddDiffusive(const Geometry& geom,
 {
     const auto dxinv = geom.InvCellSizeArray();
 
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
     for (MFIter mfi(rhs, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
         auto rp = rhs.array(mfi);
@@ -681,6 +703,9 @@ void ComputeCourant(const Geometry& geom,
 
     Real local_max = -1.0e50_rt;
 
+#ifdef AMREX_USE_OMP
+#pragma omp parallel if (Gpu::notInLaunchRegion())
+#endif
     for (MFIter mfi(prim, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
         const Box& bx = mfi.tilebox();
         auto qp = prim.const_array(mfi);
