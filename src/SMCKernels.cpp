@@ -122,15 +122,13 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 GpuArray<Real, 8>
 matmul_M8_line(int dir, int i, int j, int k, const F& func) noexcept
 {
+    GpuArray<Real, 8> line;
+    gather_line(dir, i, j, k, func, line);
     GpuArray<Real, 8> result;
     for (int col = 0; col < 8; ++col) {
         Real sum = 0.0_rt;
         for (int row = 0; row < 8; ++row) {
-            int ii = i;
-            int jj = j;
-            int kk = k;
-            apply_offset(dir, row - 4, ii, jj, kk);
-            sum += kM8[row][col] * func(ii, jj, kk);
+            sum += kM8[row][col] * line[row];
         }
         result[col] = sum;
     }
@@ -142,15 +140,13 @@ AMREX_GPU_HOST_DEVICE AMREX_FORCE_INLINE
 GpuArray<Real, 8>
 matmul_M8T_line(int dir, int i, int j, int k, const F& func) noexcept
 {
+    GpuArray<Real, 8> line;
+    gather_line(dir, i, j, k, func, line);
     GpuArray<Real, 8> result;
     for (int col = 0; col < 8; ++col) {
         Real sum = 0.0_rt;
         for (int row = 0; row < 8; ++row) {
-            int ii = i;
-            int jj = j;
-            int kk = k;
-            apply_offset(dir, row - 4, ii, jj, kk);
-            sum += kM8T[row][col] * func(ii, jj, kk);
+            sum += kM8T[row][col] * line[row];
         }
         result[col] = sum;
     }
